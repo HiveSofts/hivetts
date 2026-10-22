@@ -1,15 +1,91 @@
-import { Button, VerticalBox } from "std-widgets.slint";
+import { Button, HorizontalBox, LineEdit, TextEdit, VerticalBox } from "std-widgets.slint";
 
 export component AppWindow inherits Window {
     title: "HiveTTS";
-    width: 640px;
-    height: 480px;
+    width: 760px;
+    height: 680px;
 
-    VerticalBox {
-        Text {
-            text: "Welcome to HiveTTS";
-            font-size: 24px;
-            horizontal-alignment: center;
+    in-out property <string> speech-text: "";
+    in-out property <string> model-path: "";
+    in-out property <string> status-text: "Ready";
+    in-out property <bool> is-recording: false;
+
+    callback speak(string);
+    callback start-recording();
+    callback stop-recording();
+
+    Rectangle {
+        background: #f3f5f8;
+
+        VerticalBox {
+            padding: 24px;
+            spacing: 12px;
+
+            Text {
+                text: "HiveTTS";
+                font-size: 30px;
+                font-weight: 700;
+                color: #182230;
+            }
+
+            Text {
+                text: "Private, on-device text-to-speech and transcription";
+                font-size: 15px;
+                color: #536172;
+            }
+
+            Text {
+                text: "Text";
+                font-size: 17px;
+                font-weight: 600;
+                color: #182230;
+            }
+
+            TextEdit {
+                text <=> root.speech-text;
+                height: 230px;
+                font-size: 16px;
+            }
+
+            HorizontalBox {
+                spacing: 10px;
+
+                Button {
+                    text: "Speak";
+                    clicked => {
+                        root.speak(root.speech-text);
+                    }
+                }
+
+                Button {
+                    text: root.is-recording ? "Stop recording" : "Start recording";
+                    clicked => {
+                        if (root.is-recording) {
+                            root.stop-recording();
+                        } else {
+                            root.start-recording();
+                        }
+                    }
+                }
+            }
+
+            Text {
+                text: "Whisper model file";
+                font-size: 17px;
+                font-weight: 600;
+                color: #182230;
+            }
+
+            LineEdit {
+                text <=> root.model-path;
+                placeholder-text: "Path to a local whisper.cpp .bin model";
+            }
+
+            Text {
+                text: "Status: " + root.status-text;
+                color: #334155;
+                wrap: word-wrap;
+            }
         }
     }
 }
