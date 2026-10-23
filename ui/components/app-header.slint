@@ -1,0 +1,36 @@
+import { Button, HorizontalBox, VerticalBox } from "std-widgets.slint";
+
+export component AppHeader inherits HorizontalBox {
+    in property <string> theme: "system";
+    callback toggle-theme();
+    callback save-settings();
+
+    alignment: space-between;
+
+    VerticalBox {
+        spacing: 2px;
+        Text {
+            text: "HiveTTS";
+            font-size: 28px;
+            font-weight: 700;
+            color: root.theme == "dark" ? #f8fafc : #142033;
+        }
+        Text {
+            text: "Private speech tools, running on your device";
+            font-size: 14px;
+            color: root.theme == "dark" ? #cbd5e1 : #64748b;
+        }
+    }
+    Button {
+        text: root.theme == "dark" ? "Light theme" : "Dark theme";
+        clicked => {
+            root.toggle-theme();
+        }
+    }
+    Button {
+        text: "Save settings";
+        clicked => {
+            root.save-settings();
+        }
+    }
+}

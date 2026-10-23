@@ -1,0 +1,67 @@
+import { Button, HorizontalBox, LineEdit, TextEdit, VerticalBox } from "std-widgets.slint";
+
+export component SpeechToTextTab inherits Rectangle {
+    in property <string> theme: "system";
+    in property <bool> is-recording: false;
+    in-out property <string> transcript-text: "";
+    in-out property <string> audio-file-path: "";
+
+    callback start-recording();
+    callback stop-recording();
+    callback transcribe-file(string);
+
+    background: root.theme == "dark" ? #1f2937 : #ffffff;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: root.theme == "dark" ? #334155 : #e2e8f0;
+
+    VerticalBox {
+        padding: 18px;
+        spacing: 12px;
+        Text {
+            text: "Speech to Text";
+            font-size: 20px;
+            font-weight: 650;
+            color: root.theme == "dark" ? #f8fafc : #172338;
+        }
+        Text {
+            text: "Record from your default microphone or transcribe an audio file with whisper.cpp.";
+            color: root.theme == "dark" ? #cbd5e1 : #64748b;
+            wrap: word-wrap;
+        }
+        HorizontalBox {
+            spacing: 8px;
+            Button {
+                text: root.is-recording ? "Stop and transcribe" : "Start microphone";
+                clicked => {
+                    if (root.is-recording) {
+                        root.stop-recording();
+                    } else {
+                        root.start-recording();
+                    }
+                }
+            }
+            LineEdit {
+                text <=> root.audio-file-path;
+                placeholder-text: "Audio file path (WAV/MP3/FLAC/OGG)";
+            }
+            Button {
+                text: "Transcribe file";
+                clicked => {
+                    root.transcribe-file(root.audio-file-path);
+                }
+            }
+        }
+        Text {
+            text: "Transcript";
+            font-size: 15px;
+            font-weight: 600;
+            color: root.theme == "dark" ? #f8fafc : #172338;
+        }
+        TextEdit {
+            text <=> root.transcript-text;
+            height: 260px;
+            font-size: 15px;
+        }
+    }
+}

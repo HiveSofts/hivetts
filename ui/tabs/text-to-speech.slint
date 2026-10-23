@@ -1,0 +1,75 @@
+import { Button, HorizontalBox, LineEdit, TextEdit, VerticalBox } from "std-widgets.slint";
+
+export component TextToSpeechTab inherits Rectangle {
+    in property <string> theme: "system";
+    in-out property <string> speech-text: "";
+    in property <string> text-stats: "";
+    in-out property <string> export-path: "";
+    in-out property <string> text-file-path: "";
+
+    callback speak(string);
+    callback export-wav(string);
+    callback load-text(string);
+
+    background: root.theme == "dark" ? #1f2937 : #ffffff;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: root.theme == "dark" ? #334155 : #e2e8f0;
+
+    VerticalBox {
+        padding: 18px;
+        spacing: 12px;
+        Text {
+            text: "Text to Speech";
+            font-size: 20px;
+            font-weight: 650;
+            color: root.theme == "dark" ? #f8fafc : #172338;
+        }
+        Text {
+            text: "Enter text or load a UTF-8 .txt file. Text stays on this device.";
+            color: root.theme == "dark" ? #cbd5e1 : #64748b;
+            wrap: word-wrap;
+        }
+        TextEdit {
+            text <=> root.speech-text;
+            height: 280px;
+            font-size: 16px;
+        }
+        Text {
+            text: root.text-stats;
+            color: root.theme == "dark" ? #cbd5e1 : #64748b;
+        }
+        HorizontalBox {
+            spacing: 8px;
+            Button {
+                text: "Speak";
+                clicked => {
+                    root.speak(root.speech-text);
+                }
+            }
+            LineEdit {
+                text <=> root.export-path;
+                placeholder-text: "WAV output file path";
+            }
+            Button {
+                text: "Export WAV";
+                clicked => {
+                    root.export-wav(root.export-path);
+                }
+            }
+        }
+        HorizontalBox {
+            spacing: 8px;
+            LineEdit {
+                text <=> root.text-file-path;
+                placeholder-text: "Path to a UTF-8 .txt file";
+            }
+            Button {
+                text: "Load text file";
+                clicked => {
+                    root.load-text(root.text-file-path);
+                }
+            }
+        }
+    }
+}

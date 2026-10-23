@@ -1,0 +1,53 @@
+import { Button, HorizontalBox, VerticalBox } from "std-widgets.slint";
+
+export component ModelsTab inherits Rectangle {
+    in property <string> theme: "system";
+    callback download-model(string);
+
+    background: root.theme == "dark" ? #1f2937 : #ffffff;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: root.theme == "dark" ? #334155 : #e2e8f0;
+
+    VerticalBox {
+        padding: 18px;
+        spacing: 12px;
+        Text {
+            text: "Whisper models";
+            font-size: 20px;
+            font-weight: 650;
+            color: root.theme == "dark" ? #f8fafc : #172338;
+        }
+        Text {
+            text: "Download a model or enter a local model path in Settings. Models are stored locally.";
+            color: root.theme == "dark" ? #cbd5e1 : #64748b;
+            wrap: word-wrap;
+        }
+        HorizontalBox {
+            spacing: 8px;
+            Button {
+                text: "Download tiny";
+                clicked => {
+                    root.download-model("tiny");
+                }
+            }
+            Button {
+                text: "Download base";
+                clicked => {
+                    root.download-model("base");
+                }
+            }
+            Button {
+                text: "Download small";
+                clicked => {
+                    root.download-model("small");
+                }
+            }
+        }
+        Text {
+            text: "Downloads use curl and the official whisper.cpp model repository. The model path is configurable in Settings.";
+            color: #64748b;
+            wrap: word-wrap;
+        }
+    }
+}

@@ -1,0 +1,84 @@
+import { Button, LineEdit, Slider, VerticalBox } from "std-widgets.slint";
+
+export component SettingsTab inherits Rectangle {
+    in property <string> theme: "system";
+    in-out property <string> model-path: "";
+    in-out property <string> piper-executable: "";
+    in-out property <string> piper-voice: "";
+    in-out property <string> language: "auto";
+    in-out property <float> speech-rate: 1.0;
+
+    callback toggle-theme();
+
+    background: root.theme == "dark" ? #1f2937 : #ffffff;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: root.theme == "dark" ? #334155 : #e2e8f0;
+
+    VerticalBox {
+        padding: 18px;
+        spacing: 12px;
+        Text {
+            text: "Local engines and preferences";
+            font-size: 20px;
+            font-weight: 650;
+            color: root.theme == "dark" ? #f8fafc : #172338;
+        }
+        Text {
+            text: "Whisper.cpp model file";
+            color: root.theme == "dark" ? #e2e8f0 : #334155;
+        }
+        LineEdit {
+            text <=> root.model-path;
+            placeholder-text: "Path to ggml-tiny/base/small.bin";
+        }
+        Text {
+            text: "Piper executable (optional)";
+            color: root.theme == "dark" ? #e2e8f0 : #334155;
+        }
+        LineEdit {
+            text <=> root.piper-executable;
+            placeholder-text: "Path to the Piper executable";
+        }
+        Text {
+            text: "Piper voice model (optional)";
+            color: root.theme == "dark" ? #e2e8f0 : #334155;
+        }
+        LineEdit {
+            text <=> root.piper-voice;
+            placeholder-text: "Path to a Piper .onnx voice model";
+        }
+        Text {
+            text: "Transcription language (ISO code or auto)";
+            color: root.theme == "dark" ? #e2e8f0 : #334155;
+        }
+        LineEdit {
+            text <=> root.language;
+            placeholder-text: "auto, en, fa, ...";
+        }
+        Text {
+            text: "Speech rate";
+            color: root.theme == "dark" ? #e2e8f0 : #334155;
+        }
+        Slider {
+            minimum: 0.5;
+            maximum: 2.0;
+            value <=> root.speech-rate;
+        }
+        Text {
+            text: "Theme";
+            color: root.theme == "dark" ? #f8fafc : #334155;
+        }
+        Button {
+            text: root.theme == "dark" ? "Switch to light" : "Switch to dark";
+            clicked => {
+                root.toggle-theme();
+            }
+        }
+        Text {
+            text: "Changes are saved to your local HiveTTS settings file when you select Save settings.";
+            color: root.theme == "dark" ? #cbd5e1 : #64748b;
+            wrap: word-wrap;
+        }
+    }
+}

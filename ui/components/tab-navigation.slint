@@ -1,0 +1,32 @@
+import { Button, HorizontalBox } from "std-widgets.slint";
+
+export component TabNavigation inherits HorizontalBox {
+    in-out property <string> current-tab: "tts";
+
+    spacing: 8px;
+
+    Button {
+        text: "Text to Speech";
+        clicked => {
+            root.current-tab = "tts";
+        }
+    }
+    Button {
+        text: "Speech to Text";
+        clicked => {
+            root.current-tab = "stt";
+        }
+    }
+    Button {
+        text: "Models";
+        clicked => {
+            root.current-tab = "models";
+        }
+    }
+    Button {
+        text: "Settings";
+        clicked => {
+            root.current-tab = "settings";
+        }
+    }
+}

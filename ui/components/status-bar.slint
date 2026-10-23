@@ -1,0 +1,16 @@
+export component StatusBar inherits Rectangle {
+    in property <string> theme: "system";
+    in property <string> status-text: "";
+
+    background: root.theme == "dark" ? #263449 : #e9eff8;
+    border-radius: 8px;
+    height: 36px;
+
+    Text {
+        x: 12px;
+        y: 8px;
+        text: "●  " + root.status-text;
+        color: root.theme == "dark" ? #e2e8f0 : #334155;
+        wrap: word-wrap;
+    }
+}
