@@ -1,91 +1,318 @@
-import { Button, HorizontalBox, LineEdit, TextEdit, VerticalBox } from "std-widgets.slint";
+import { Button, HorizontalBox, LineEdit, Slider, TextEdit, VerticalBox } from "std-widgets.slint";
 
 export component AppWindow inherits Window {
     title: "HiveTTS";
-    width: 760px;
-    height: 680px;
+    width: 940px;
+    height: 760px;
 
     in-out property <string> speech-text: "";
+    in-out property <string> transcript-text: "";
     in-out property <string> model-path: "";
+    in-out property <string> piper-executable: "";
+    in-out property <string> piper-voice: "";
+    in-out property <string> language: "auto";
+    in-out property <string> theme: "system";
+    in-out property <float> speech-rate: 1.0;
     in-out property <string> status-text: "Ready";
     in-out property <bool> is-recording: false;
+    in-out property <string> current-tab: "tts";
+    in-out property <string> text-stats: "0 characters · 0 words";
 
     callback speak(string);
     callback start-recording();
     callback stop-recording();
+    callback load-text(string);
+    callback export-wav(string);
+    callback transcribe-file(string);
+    callback save-settings();
+    callback download-model(string);
+    callback update-text-stats(string);
+
+    changed speech-text => {
+        root.update-text-stats(root.speech-text);
+    }
+
+    background: root.theme == "dark" ? #111827 : #f5f7fb;
 
     Rectangle {
-        background: #f3f5f8;
+        background: root.theme == "dark" ? #111827 : #f5f7fb;
 
         VerticalBox {
-            padding: 24px;
-            spacing: 12px;
+            padding: 22px;
+            spacing: 14px;
 
-            Text {
-                text: "HiveTTS";
-                font-size: 30px;
-                font-weight: 700;
-                color: #182230;
-            }
-
-            Text {
-                text: "Private, on-device text-to-speech and transcription";
-                font-size: 15px;
-                color: #536172;
-            }
-
-            Text {
-                text: "Text";
-                font-size: 17px;
-                font-weight: 600;
-                color: #182230;
-            }
-
-            TextEdit {
-                text <=> root.speech-text;
-                height: 230px;
-                font-size: 16px;
+            HorizontalBox {
+                alignment: space-between;
+                VerticalBox {
+                    spacing: 2px;
+                    Text {
+                        text: "HiveTTS";
+                        font-size: 28px;
+                        font-weight: 700;
+                        color: root.theme == "dark" ? #f8fafc : #142033;
+                    }
+                    Text {
+                        text: "Private speech tools, running on your device";
+                        font-size: 14px;
+                        color: root.theme == "dark" ? #cbd5e1 : #64748b;
+                    }
+                }
+                Button {
+                    text: root.theme == "dark" ? "Light theme" : "Dark theme";
+                    clicked => {
+                        root.theme = root.theme == "dark" ? "light" : "dark";
+                    }
+                }
+                Button {
+                    text: "Save settings";
+                    clicked => { root.save-settings(); }
+                }
             }
 
             HorizontalBox {
-                spacing: 10px;
-
+                spacing: 8px;
                 Button {
-                    text: "Speak";
-                    clicked => {
-                        root.speak(root.speech-text);
-                    }
+                    text: "Text to Speech";
+                    clicked => { root.current-tab = "tts"; }
                 }
-
                 Button {
-                    text: root.is-recording ? "Stop recording" : "Start recording";
-                    clicked => {
-                        if (root.is-recording) {
-                            root.stop-recording();
-                        } else {
-                            root.start-recording();
+                    text: "Speech to Text";
+                    clicked => { root.current-tab = "stt"; }
+                }
+                Button {
+                    text: "Models";
+                    clicked => { root.current-tab = "models"; }
+                }
+                Button {
+                    text: "Settings";
+                    clicked => { root.current-tab = "settings"; }
+                }
+            }
+
+            if root.current-tab == "tts": Rectangle {
+                background: root.theme == "dark" ? #1f2937 : #ffffff;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: root.theme == "dark" ? #334155 : #e2e8f0;
+                VerticalBox {
+                    padding: 18px;
+                    spacing: 12px;
+                    Text {
+                        text: "Text to Speech";
+                        font-size: 20px;
+                        font-weight: 650;
+                        color: root.theme == "dark" ? #f8fafc : #172338;
+                    }
+                    Text {
+                        text: "Enter text or load a UTF-8 .txt file. Text stays on this device.";
+                        color: root.theme == "dark" ? #cbd5e1 : #64748b;
+                        wrap: word-wrap;
+                    }
+                    TextEdit {
+                        text <=> root.speech-text;
+                        height: 280px;
+                        font-size: 16px;
+                    }
+                    Text {
+                        text: root.text-stats;
+                        color: root.theme == "dark" ? #cbd5e1 : #64748b;
+                    }
+                    HorizontalBox {
+                        spacing: 8px;
+                        Button {
+                            text: "Speak";
+                            clicked => { root.speak(root.speech-text); }
+                        }
+                        LineEdit {
+                            text <=> root.export-path;
+                            placeholder-text: "WAV output file path";
+                        }
+                        Button {
+                            text: "Export WAV";
+                            clicked => { root.export-wav(root.export-path); }
+                        }
+                    }
+                    HorizontalBox {
+                        spacing: 8px;
+                        LineEdit {
+                            text <=> root.text-file-path;
+                            placeholder-text: "Path to a UTF-8 .txt file";
+                        }
+                        Button {
+                            text: "Load text file";
+                            clicked => { root.load-text(root.text-file-path); }
                         }
                     }
                 }
             }
 
-            Text {
-                text: "Whisper model file";
-                font-size: 17px;
-                font-weight: 600;
-                color: #182230;
+            if root.current-tab == "stt": Rectangle {
+                background: root.theme == "dark" ? #1f2937 : #ffffff;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: root.theme == "dark" ? #334155 : #e2e8f0;
+                VerticalBox {
+                    padding: 18px;
+                    spacing: 12px;
+                    Text {
+                        text: "Speech to Text";
+                        font-size: 20px;
+                        font-weight: 650;
+                        color: root.theme == "dark" ? #f8fafc : #172338;
+                    }
+                    Text {
+                        text: "Record from your default microphone or transcribe an audio file with whisper.cpp.";
+                        color: root.theme == "dark" ? #cbd5e1 : #64748b;
+                        wrap: word-wrap;
+                    }
+                    HorizontalBox {
+                        spacing: 8px;
+                        Button {
+                            text: root.is-recording ? "Stop and transcribe" : "Start microphone";
+                            clicked => {
+                                if (root.is-recording) {
+                                    root.stop-recording();
+                                } else {
+                                    root.start-recording();
+                                }
+                            }
+                        }
+                        LineEdit {
+                            text <=> root.audio-file-path;
+                            placeholder-text: "Audio file path (WAV/MP3/FLAC/OGG)";
+                        }
+                        Button {
+                            text: "Transcribe file";
+                            clicked => { root.transcribe-file(root.audio-file-path); }
+                        }
+                    }
+                    Text {
+                        text: "Transcript";
+                        font-size: 15px;
+                        font-weight: 600;
+                        color: root.theme == "dark" ? #f8fafc : #172338;
+                    }
+                    TextEdit {
+                        text <=> root.transcript-text;
+                        height: 260px;
+                        font-size: 15px;
+                    }
+                }
             }
 
-            LineEdit {
-                text <=> root.model-path;
-                placeholder-text: "Path to a local whisper.cpp .bin model";
+            if root.current-tab == "models": Rectangle {
+                background: root.theme == "dark" ? #1f2937 : #ffffff;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: root.theme == "dark" ? #334155 : #e2e8f0;
+                VerticalBox {
+                    padding: 18px;
+                    spacing: 12px;
+                    Text {
+                        text: "Whisper models";
+                        font-size: 20px;
+                        font-weight: 650;
+                        color: root.theme == "dark" ? #f8fafc : #172338;
+                    }
+                    Text {
+                        text: "Download a model or enter a local model path in Settings. Models are stored locally.";
+                        color: root.theme == "dark" ? #cbd5e1 : #64748b;
+                        wrap: word-wrap;
+                    }
+                    HorizontalBox {
+                        spacing: 8px;
+                        Button {
+                            text: "Download tiny";
+                            clicked => { root.download-model("tiny"); }
+                        }
+                        Button {
+                            text: "Download base";
+                            clicked => { root.download-model("base"); }
+                        }
+                        Button {
+                            text: "Download small";
+                            clicked => { root.download-model("small"); }
+                        }
+                    }
+                    Text {
+                        text: "Downloads use curl and the official whisper.cpp model repository. The model path is configurable in Settings.";
+                        color: #64748b;
+                        wrap: word-wrap;
+                    }
+                }
             }
 
-            Text {
-                text: "Status: " + root.status-text;
-                color: #334155;
-                wrap: word-wrap;
+            if root.current-tab == "settings": Rectangle {
+                background: root.theme == "dark" ? #1f2937 : #ffffff;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: root.theme == "dark" ? #334155 : #e2e8f0;
+                VerticalBox {
+                    padding: 18px;
+                    spacing: 12px;
+                    Text {
+                        text: "Local engines and preferences";
+                        font-size: 20px;
+                        font-weight: 650;
+                        color: root.theme == "dark" ? #f8fafc : #172338;
+                    }
+                    Text { text: "Whisper.cpp model file"; color: root.theme == "dark" ? #e2e8f0 : #334155; }
+                    LineEdit {
+                        text <=> root.model-path;
+                        placeholder-text: "Path to ggml-tiny/base/small.bin";
+                    }
+                    Text { text: "Piper executable (optional)"; color: root.theme == "dark" ? #e2e8f0 : #334155; }
+                    LineEdit {
+                        text <=> root.piper-executable;
+                        placeholder-text: "Path to the Piper executable";
+                    }
+                    Text { text: "Piper voice model (optional)"; color: root.theme == "dark" ? #e2e8f0 : #334155; }
+                    LineEdit {
+                        text <=> root.piper-voice;
+                        placeholder-text: "Path to a Piper .onnx voice model";
+                    }
+                    Text { text: "Transcription language (ISO code or auto)"; color: root.theme == "dark" ? #e2e8f0 : #334155; }
+                    LineEdit {
+                        text <=> root.language;
+                        placeholder-text: "auto, en, fa, ...";
+                    }
+                    Text { text: "Speech rate"; color: root.theme == "dark" ? #e2e8f0 : #334155; }
+                    Slider {
+                        minimum: 0.5;
+                        maximum: 2.0;
+                        value <=> root.speech-rate;
+                    }
+                    Text { text: "Theme"; color: root.theme == "dark" ? #f8fafc : #334155; }
+                    Button {
+                        text: root.theme == "dark" ? "Switch to light" : "Switch to dark";
+                        clicked => {
+                            root.theme = root.theme == "dark" ? "light" : "dark";
+                        }
+                    }
+                    Text {
+                        text: "Changes are saved to your local HiveTTS settings file when you select Save settings.";
+                        color: root.theme == "dark" ? #cbd5e1 : #64748b;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            Rectangle {
+                background: root.theme == "dark" ? #263449 : #e9eff8;
+                border-radius: 8px;
+                height: 36px;
+                Text {
+                    x: 12px;
+                    y: 8px;
+                    text: "●  " + root.status-text;
+                    color: root.theme == "dark" ? #e2e8f0 : #334155;
+                    wrap: word-wrap;
+                }
             }
         }
     }
+
+    in-out property <string> export-path: "";
+    in-out property <string> text-file-path: "";
+    in-out property <string> audio-file-path: "";
 }
