@@ -2,15 +2,15 @@ import { VerticalBox } from "std-widgets.slint";
 import { AppHeader } from "components/app-header.slint";
 import { StatusBar } from "components/status-bar.slint";
 import { TabNavigation } from "components/tab-navigation.slint";
-import { ModelsTab } from "tabs/models.slint";
+import { HubModel, LanguageOption, ModelsTab } from "tabs/models.slint";
 import { SettingsTab } from "tabs/settings.slint";
 import { SpeechToTextTab } from "tabs/speech-to-text.slint";
 import { TextToSpeechTab } from "tabs/text-to-speech.slint";
 
 export component AppWindow inherits Window {
     title: "HiveTTS";
-    width: 940px;
-    height: 800px;
+    width: 1000px;
+    height: 1000px;
 
     in-out property <string> speech-text: "";
     in-out property <string> transcript-text: "";
@@ -27,6 +27,12 @@ export component AppWindow inherits Window {
     in-out property <string> export-path: "";
     in-out property <string> text-file-path: "";
     in-out property <string> audio-file-path: "";
+    in-out property <[HubModel]> model-cards: [];
+    in property <[LanguageOption]> language-options: [];
+    in property <[string]> language-option-labels: [];
+    in-out property <string> model-download-progress-text: "";
+    in-out property <float> model-download-progress: 0;
+    in-out property <string> active-model-download-id: "";
 
     callback speak(string);
     callback start-recording();
@@ -37,6 +43,13 @@ export component AppWindow inherits Window {
     callback save-settings();
     callback download-model(string);
     callback update-text-stats(string);
+    callback refresh-models(string, string, string, string, string, string);
+    callback search-languages(string);
+    callback download-hub-model(string, string);
+    callback cancel-model-download(string);
+    callback open-model-folder(string);
+    callback open-hub-repository(string);
+    callback delete-model(string);
 
     changed speech-text => {
         root.update-text-stats(root.speech-text);
@@ -100,8 +113,35 @@ export component AppWindow inherits Window {
 
             if root.current-tab == "models": ModelsTab {
                 theme: root.theme;
+                models <=> root.model-cards;
+                language-options: root.language-options;
+                language-option-labels: root.language-option-labels;
+                search-languages(query) => {
+                    root.search-languages(query);
+                }
+                download-progress-text <=> root.model-download-progress-text;
+                download-progress <=> root.model-download-progress;
+                active-download-id <=> root.active-model-download-id;
                 download-model(model) => {
                     root.download-model(model);
+                }
+                refresh-models(query, category, max-size, language, framework, hardware) => {
+                    root.refresh-models(query, category, max-size, language, framework, hardware);
+                }
+                download-hub-model(model, task) => {
+                    root.download-hub-model(model, task);
+                }
+                cancel-download(model) => {
+                    root.cancel-model-download(model);
+                }
+                open-model-folder(path) => {
+                    root.open-model-folder(path);
+                }
+                open-hub-repository(model) => {
+                    root.open-hub-repository(model);
+                }
+                delete-model(model) => {
+                    root.delete-model(model);
                 }
             }
 

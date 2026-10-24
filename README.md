@@ -44,6 +44,12 @@ background threads; results are posted back to Slint through
 - Transcription of audio paths supported by the installed `whisper-cli` build.
 - Whisper.cpp tiny, base, and small model downloads; settings are stored as
   local JSON.
+- Hugging Face discovery for TTS and automatic speech-recognition repositories,
+  with repository metadata, file-size estimates, language/framework filters,
+  hardware caveats, and a locally scanned installed-model view.
+- Asynchronous Hugging Face downloads with byte-based progress, speed/ETA,
+  retry/resume from retained partial files, repository revision tracking, and
+  task-organized storage under the local HiveTTS models directory.
 - SRT and VTT timestamp formatting utilities with unit tests.
 
 ## Current limitations
@@ -55,8 +61,10 @@ implementation of every requested feature. In particular:
   project does not yet use the `whisper-rs`, `cpal`, `rodio`, or Rust `tts`
   bindings. Microphone capture depends on FFmpeg, and Windows microphone
   capture is not implemented.
-- The model screen downloads models and displays download state as text, but
-  does not yet provide an in-app byte progress bar or model deletion controls.
+- Hugging Face downloads can be cancelled and resumed by selecting Download
+  again, but do not currently provide a separate pause control. Compatibility is
+  conservative: it reports known RAM limitations and otherwise marks hardware
+  compatibility unknown rather than claiming support.
 - Playback pause/resume/stop, a live input level meter, clipboard actions,
   MP3/SRT/VTT export from the UI, timestamped transcription output, and
   cancellation are not yet wired into the interface.
@@ -79,7 +87,8 @@ event loop.
   input support and the macOS build uses AVFoundation.
 - `whisper-cli` from whisper.cpp on `PATH` for speech recognition.
 - A local whisper.cpp model (`.bin`) or use the Models tab to download tiny,
-  base, or small. The model manager requires `curl`.
+  base, or small. The model manager requires `curl`; set `HF_TOKEN` in the
+  process environment when accessing gated Hugging Face repositories.
 - Linux TTS fallback: install eSpeak NG (`espeak-ng`) or eSpeak. Piper is
   optional.
 - Piper speech and WAV export: install the Piper executable and download a
@@ -136,7 +145,9 @@ speech and WAV export. Microphone capture is currently unsupported on Windows.
    then choose Speak or Export WAV.
 3. In **Speech to Text**, enter a model in Settings, then start/stop microphone
    recording or enter an audio file path and select Transcribe file.
-4. Use **Models** to fetch a tiny, base, or small Whisper model.
+4. Use **Models** to discover TTS/ASR repositories from Hugging Face, filter
+   results, download models, and manage installed model files. The Whisper.cpp
+   tiny/base/small downloads remain available in the same section.
 5. Adjust engine paths, language (`auto` or a language code), and speech rate in
    **Settings**. Select Save settings to persist configuration.
 

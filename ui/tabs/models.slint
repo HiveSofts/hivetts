@@ -1,52 +1,327 @@
-import { Button, HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { Button, ComboBox, HorizontalBox, LineEdit, ScrollView, VerticalBox } from "std-widgets.slint";
+
+export struct HubModel {
+    id: string,
+    author: string,
+    task: string,
+    category-label: string,
+    description: string,
+    languages: string,
+    framework: string,
+    architecture: string,
+    size-label: string,
+    stats: string,
+    license: string,
+    compatibility: string,
+    installed: bool,
+    deletable: bool,
+    local-path: string,
+}
+
+export struct LanguageOption {
+    name: string,
+    code: string,
+}
 
 export component ModelsTab inherits Rectangle {
     in property <string> theme: "system";
+    in-out property <[HubModel]> models: [];
+    in-out property <string> query: "";
+    in-out property <string> language-filter: "";
+    in-out property <string> language-label: "";
+    in-out property <string> language-search: "";
+    in-out property <string> active-category: "all";
+    in-out property <string> download-progress-text: "";
+    in-out property <float> download-progress: 0;
+    in-out property <string> active-download-id: "";
+    in-out property <string> pending-delete-id: "";
+    callback refresh-models(string, string, string, string, string, string);
+    callback search-languages(string);
     callback download-model(string);
+    callback download-hub-model(string, string);
+    callback cancel-download(string);
+    callback open-model-folder(string);
+    callback open-hub-repository(string);
+    callback delete-model(string);
 
-    background: root.theme == "dark" ? #1f2937 : #ffffff;
+    in property <[LanguageOption]> language-options: [];
+    in property <[string]> language-option-labels: [];
+
+    changed language-search => {
+        root.search-languages(root.language-search);
+    }
+
+    background: root.theme == "dark" ? #1b202b : #ffffff;
     border-radius: 12px;
     border-width: 1px;
-    border-color: root.theme == "dark" ? #334155 : #e2e8f0;
+    border-color: root.theme == "dark" ? #343b4b : #e2e8f0;
 
     VerticalBox {
-        padding: 18px;
-        spacing: 12px;
-        Text {
-            text: "Whisper models";
-            font-size: 20px;
-            font-weight: 650;
-            color: root.theme == "dark" ? #f8fafc : #172338;
-        }
-        Text {
-            text: "Download a model or enter a local model path in Settings. Models are stored locally.";
-            color: root.theme == "dark" ? #cbd5e1 : #64748b;
-            wrap: word-wrap;
-        }
+        padding: 16px;
+        spacing: 8px;
+
         HorizontalBox {
-            spacing: 8px;
-            Button {
-                text: "Download tiny";
-                clicked => {
-                    root.download-model("tiny");
+            spacing: 10px;
+            VerticalBox {
+                spacing: 2px;
+                Text {
+                    text: "Hugging Face Model Hub";
+                    font-size: 21px;
+                    font-weight: 700;
+                    color: root.theme == "dark" ? #f8fafc : #172338;
+                }
+                Text {
+                    text: "Discover and manage speech models on this device";
+                    color: root.theme == "dark" ? #aab4c5 : #64748b;
                 }
             }
+            Rectangle { }
             Button {
-                text: "Download base";
+                text: "Refresh";
+                height: 28px;
                 clicked => {
-                    root.download-model("base");
+                    root.refresh-models(root.query, root.active-category, "",
+                        root.language-filter, "", "");
                 }
             }
-            Button {
-                text: "Download small";
-                clicked => {
-                    root.download-model("small");
+        }
+
+        VerticalBox {
+            spacing: 6px;
+            HorizontalBox {
+                spacing: 6px;
+                LineEdit {
+                    text <=> root.query;
+                    height: 32px;
+                    horizontal-stretch: 1;
+                    placeholder-text: "Search models, authors, tasks, languages, or architecture";
+                    accepted => {
+                        root.refresh-models(root.query, root.active-category, "",
+                            root.language-filter, "", "");
+                    }
+                }
+                Button {
+                    text: "🔍";
+                    width: 32px;
+                    height: 32px;
+                    clicked => {
+                        root.refresh-models(root.query, root.active-category, "",
+                            root.language-filter, "", "");
+                    }
+                }
+                language-selector := ComboBox {
+                    model: root.language-option-labels;
+                    current-value: root.language-filter == "" ? "All languages" : root.language-label + " (" + root.language-filter + ")";
+                    horizontal-stretch: 1;
+                    selected(value) => {
+                        let index = language-selector.current-index;
+                        if (index >= 0 && index < root.language-options.length) {
+                            let language = root.language-options[index];
+                            root.language-filter = language.code;
+                            root.language-label = language.name;
+                            root.active-category = "languages";
+                            root.refresh-models(root.query, root.active-category, "",
+                                root.language-filter, "", "");
+                        }
+                    }
+                }
+                // LineEdit {
+                //     text <=> root.language-search;
+                //     height: 30px;
+                //     width: 210px;
+                //     placeholder-text: "Find a language by name or code";
+                //     accepted => {
+                //         root.search-languages(root.language-search);
+                //     }
+                // }
+                Button {
+                    text: "🔍";
+                    width: 32px;
+                    height: 30px;
+                    clicked => {
+                        root.search-languages(root.language-search);
+                    }
+                }
+            }
+            // HorizontalBox {
+            //     spacing: 6px;
+            //     Text {
+            //         text: "Languages";
+            //         color: root.theme == "dark" ? #cbd5e1 : #475569;
+            //         font-weight: 600;
+            //         vertical-alignment: center;
+            //     }
+            //     language-selector := ComboBox {
+            //         model: root.language-option-labels;
+            //         current-value: root.language-filter == "" ? "All languages" : root.language-label + " (" + root.language-filter + ")";
+            //         horizontal-stretch: 1;
+            //         selected(value) => {
+            //             let index = language-selector.current-index;
+            //             if (index >= 0 && index < root.language-options.length) {
+            //                 let language = root.language-options[index];
+            //                 root.language-filter = language.code;
+            //                 root.language-label = language.name;
+            //                 root.active-category = "languages";
+            //                 root.refresh-models(root.query, root.active-category, "",
+            //                     root.language-filter, "", "");
+            //             }
+            //         }
+            //     }
+            //     // LineEdit {
+            //     //     text <=> root.language-search;
+            //     //     height: 30px;
+            //     //     width: 210px;
+            //     //     placeholder-text: "Find a language by name or code";
+            //     //     accepted => {
+            //     //         root.search-languages(root.language-search);
+            //     //     }
+            //     // }
+            //     Button {
+            //         text: "🔍";
+            //         width: 32px;
+            //         height: 30px;
+            //         clicked => {
+            //             root.search-languages(root.language-search);
+            //         }
+            //     }
+            // }
+        }
+
+        if root.download-progress-text != "": VerticalBox {
+            spacing: 4px;
+            HorizontalBox {
+                spacing: 6px;
+                Text {
+                    text: root.download-progress-text;
+                    color: root.theme == "dark" ? #ddd6fe : #5b21b6;
+                    overflow: elide;
+                }
+                if root.active-download-id != "": Button {
+                    text: "Cancel";
+                    height: 26px;
+                    clicked => { root.cancel-download(root.active-download-id); }
+                }
+            }
+            Rectangle {
+                height: 6px;
+                background: root.theme == "dark" ? #303748 : #e2e8f0;
+                border-radius: 3px;
+                Rectangle {
+                    width: parent.width * root.download-progress;
+                    height: parent.height;
+                    background: #8b5cf6;
+                    border-radius: 3px;
+                }
+            }
+        }
+
+        ScrollView {
+            VerticalBox {
+                spacing: 8px;
+                for model in root.models: Rectangle {
+                    height: 240px;
+                    background: root.theme == "dark" ? #222a38 : #f8fafc;
+                    border-color: root.theme == "dark" ? #384357 : #e2e8f0;
+                    border-width: 1px;
+                    border-radius: 9px;
+                    VerticalBox {
+                        padding: 10px;
+                        spacing: 4px;
+                        HorizontalBox {
+                            spacing: 8px;
+                            Text {
+                                text: model.id;
+                                font-size: 16px;
+                                font-weight: 650;
+                                color: root.theme == "dark" ? #f8fafc : #172338;
+                                overflow: elide;
+                            }
+                            Rectangle { }
+                            Text {
+                                text: model.installed ? "INSTALLED" : "HUGGING FACE";
+                                color: model.installed ? #34d399 : #a78bfa;
+                                font-size: 11px;
+                                font-weight: 700;
+                            }
+                        }
+                        Text {
+                            text: model.author + "  ·  " + model.category-label;
+                            color: root.theme == "dark" ? #cbd5e1 : #475569;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: model.description;
+                            color: root.theme == "dark" ? #aab4c5 : #64748b;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: "Languages: " + model.languages + "    Framework: " + model.framework;
+                            color: root.theme == "dark" ? #cbd5e1 : #475569;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: "Architecture: " + model.architecture + "    Size: " + model.size-label;
+                            color: root.theme == "dark" ? #cbd5e1 : #475569;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: model.stats + "    License: " + model.license;
+                            color: root.theme == "dark" ? #cbd5e1 : #475569;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: model.compatibility;
+                            color: model.compatibility == "Compatible" ? #34d399 : #fbbf24;
+                            overflow: elide;
+                        }
+                        if model.installed: Text {
+                            text: "Local: " + model.local-path;
+                            color: root.theme == "dark" ? #aab4c5 : #64748b;
+                            overflow: elide;
+                        }
+                        HorizontalBox {
+                            spacing: 6px;
+                            if model.installed: Button {
+                                text: "Open Folder";
+                                height: 28px;
+                                clicked => { root.open-model-folder(model.local-path); }
+                            }
+                            if model.installed && model.deletable: Button {
+                                text: root.pending-delete-id == model.id ? "Confirm delete" : "Delete";
+                                height: 28px;
+                                clicked => {
+                                    if (root.pending-delete-id == model.id) {
+                                        root.delete-model(model.id);
+                                        root.pending-delete-id = "";
+                                    } else {
+                                        root.pending-delete-id = model.id;
+                                    }
+                                }
+                            }
+                            if model.installed && model.deletable && root.pending-delete-id == model.id: Button {
+                                text: "Keep";
+                                height: 28px;
+                                clicked => { root.pending-delete-id = ""; }
+                            }
+                            if !model.installed: Button {
+                                text: "Download";
+                                height: 28px;
+                                enabled: root.active-download-id == "";
+                                clicked => { root.download-hub-model(model.id, model.task); }
+                            }
+                            Button {
+                                text: "View on Hugging Face";
+                                height: 28px;
+                                clicked => { root.open-hub-repository(model.id); }
+                            }
+                        }
+                    }
                 }
             }
         }
         Text {
-            text: "Downloads use curl and the official whisper.cpp model repository. The model path is configurable in Settings.";
-            color: #64748b;
+            text: "Compatibility is marked unknown unless available system memory indicates a resource limitation. Downloads require curl; gated repositories need HF_TOKEN.";
+            color: root.theme == "dark" ? #8490a4 : #64748b;
             wrap: word-wrap;
         }
     }
