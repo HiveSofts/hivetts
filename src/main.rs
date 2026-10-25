@@ -631,24 +631,14 @@ fn filter_models(
                 .saturating_mul(1024 * 1024),
         )
     };
-    let query = query.to_lowercase();
+    let query = query.trim().to_lowercase();
     let language = language.to_lowercase();
     let framework = framework.to_lowercase();
     let hardware = hardware.to_lowercase();
     Ok(models
         .into_iter()
         .filter(|model| {
-            let query_matches = query.is_empty()
-                || [
-                    &model.id,
-                    &model.author,
-                    &model.task,
-                    &model.languages,
-                    &model.architecture,
-                    &model.framework,
-                ]
-                .iter()
-                .any(|field| field.to_lowercase().contains(&query));
+            let query_matches = model_matches_query(model, &query);
             let language_matches =
                 language.is_empty() || model.languages.to_lowercase().contains(&language);
             let framework_matches =
@@ -667,6 +657,31 @@ fn filter_models(
                 && size_matches
         })
         .collect())
+}
+
+fn model_matches_query(model: &tts::models::HubModel, query: &str) -> bool {
+    let query = query.to_lowercase();
+    let terms = query.split_whitespace().collect::<Vec<_>>();
+    terms.is_empty()
+        || terms.iter().all(|term| {
+            [
+                &model.id,
+                &model.author,
+                &model.task,
+                &model.description,
+                &model.languages,
+                &model.framework,
+                &model.architecture,
+                &model.license,
+                &model.license,
+            ]
+            .iter()
+            .any(|field| field.to_lowercase().contains(term))
+                || model
+                    .tags
+                    .iter()
+                    .any(|tag| tag.to_lowercase().contains(term))
+        })
 }
 
 fn has_language_metadata(languages: &str) -> bool {
@@ -692,6 +707,13 @@ fn set_model_cards(weak: slint::Weak<AppWindow>, models: Vec<tts::models::HubMod
             languages: model.languages.into(),
             framework: model.framework.into(),
             architecture: model.architecture.into(),
+            tags: model
+                .tags
+                .into_iter()
+                .take(6)
+                .collect::<Vec<_>>()
+                .join(", ")
+                .into(),
             size_label: if model.size_bytes == 0 {
                 "Unknown".into()
             } else {
@@ -720,6 +742,42 @@ fn set_model_cards(weak: slint::Weak<AppWindow>, models: Vec<tts::models::HubMod
         }
     }) {
         eprintln!("Could not update model list: {error}");
+    }
+}
+
+#[cfg(test)]
+mod model_search_tests {
+    use super::*;
+
+    fn model() -> tts::models::HubModel {
+        tts::models::HubModel {
+            id: "voice/model".into(),
+            author: "voice".into(),
+            task: "text-to-speech".into(),
+            description: "A multilingual expressive voice".into(),
+            languages: "English, French".into(),
+            tags: vec!["language:en".into(), "expressive".into()],
+            framework: "pytorch".into(),
+            architecture: "VitsModel".into(),
+            size_bytes: 0,
+            downloads: 0,
+            likes: 0,
+            license: "apache-2.0".into(),
+            compatibility: "Unknown".into(),
+            installed: false,
+            deletable: false,
+            local_path: String::new(),
+        }
+    }
+
+    #[test]
+    fn model_search_matches_description_and_tags_case_insensitively() {
+        let model = model();
+
+        assert!(model_matches_query(&model, "EXPRESSIVE english"));
+        assert!(model_matches_query(&model, "apache-2.0"));
+        assert!(!model_matches_query(&model, "expressive german"));
+        assert!(model_matches_query(&model, "  "));
     }
 }
 

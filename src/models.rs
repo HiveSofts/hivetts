@@ -44,6 +44,7 @@ pub struct HubModel {
     pub task: String,
     pub description: String,
     pub languages: String,
+    pub tags: Vec<String>,
     pub framework: String,
     pub architecture: String,
     pub size_bytes: u64,
@@ -69,6 +70,7 @@ struct RegistryEntry {
     author: String,
     description: String,
     languages: String,
+    tags: Vec<String>,
     framework: String,
     architecture: String,
     license: String,
@@ -89,6 +91,7 @@ impl Default for RegistryEntry {
             author: String::new(),
             description: String::new(),
             languages: String::new(),
+            tags: Vec::new(),
             framework: String::new(),
             architecture: String::new(),
             license: String::new(),
@@ -204,7 +207,7 @@ pub fn discover_models(query: &str, category: &str) -> Result<Vec<HubModel>> {
     let installed = installed_registry()?;
     for task in tasks {
         let mut url = format!(
-            "https://huggingface.co/api/models?pipeline_tag={task}&sort=downloads&direction=-1&limit=12&full=true"
+            "https://huggingface.co/api/models?pipeline_tag={task}&sort=downloads&direction=-1&limit=30&full=true"
         );
         if !query.trim().is_empty() {
             url.push_str("&search=");
@@ -212,11 +215,19 @@ pub fn discover_models(query: &str, category: &str) -> Result<Vec<HubModel>> {
         }
         let response = curl_output(&[&url])?;
         let mut listed: Vec<ApiModel> = serde_json::from_slice(&response)?;
-        if listed.is_empty() && !query.trim().is_empty() {
-            let fallback = format!(
+        if !query.trim().is_empty() {
+            let tagged_candidates_url = format!(
                 "https://huggingface.co/api/models?pipeline_tag={task}&sort=downloads&direction=-1&limit=12&full=true"
             );
-            listed = serde_json::from_slice(&curl_output(&[&fallback])?)?;
+            let tagged_candidates: Vec<ApiModel> =
+                serde_json::from_slice(&curl_output(&[&tagged_candidates_url])?)?;
+            let mut seen = listed
+                .iter()
+                .map(|model| model.id.clone())
+                .collect::<std::collections::HashSet<_>>();
+            listed.extend(tagged_candidates.into_iter().filter(|model| {
+                api_model_matches_query(model, query) && seen.insert(model.id.clone())
+            }));
         }
         for listed_model in listed {
             let details_url = format!(
@@ -259,6 +270,12 @@ pub fn discover_models(query: &str, category: &str) -> Result<Vec<HubModel>> {
                 .unwrap_or_else(|| id.split('/').next().unwrap_or("unknown").to_owned());
             let languages = model_languages(metadata);
             let architecture = model_architecture(metadata);
+            let mut tags = model_tags(metadata);
+            for tag in model_tags(&listed_model) {
+                if !tags.contains(&tag) {
+                    tags.push(tag);
+                }
+            }
             let description = model_description(metadata).unwrap_or_else(|| {
                 readme_description(&id)
                     .unwrap_or_else(|| "Description not provided by the model repository.".into())
@@ -274,6 +291,7 @@ pub fn discover_models(query: &str, category: &str) -> Result<Vec<HubModel>> {
                 } else {
                     languages.join(", ")
                 },
+                tags,
                 framework: metadata
                     .library_name
                     .clone()
@@ -310,6 +328,7 @@ pub fn installed_models() -> Result<Vec<HubModel>> {
             task: entry.task.clone(),
             description: display_or_unknown(&entry.description),
             languages: display_or_unknown(&entry.languages),
+            tags: entry.tags.clone(),
             framework: display_or_unknown(&entry.framework),
             architecture: display_or_unknown(&entry.architecture),
             size_bytes: entry.size_bytes,
@@ -332,6 +351,7 @@ pub fn installed_models() -> Result<Vec<HubModel>> {
             task: "automatic-speech-recognition".into(),
             description: "Legacy whisper.cpp model already present in local storage.".into(),
             languages: "Multilingual".into(),
+            tags: vec!["automatic-speech-recognition".into(), "whisper".into()],
             framework: "whisper.cpp".into(),
             architecture: "Whisper GGML".into(),
             size_bytes: fs::metadata(&path)?.len(),
@@ -634,6 +654,7 @@ fn download_hub_model_inner(
             .unwrap_or("")
             .to_owned(),
         languages: model_languages(&model).join(", "),
+        tags: model_tags(&model),
         framework: model.library_name.clone().unwrap_or_default(),
         architecture: model_architecture(&model),
         license: model_license(&model),
@@ -974,6 +995,47 @@ fn model_languages(model: &ApiModel) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn api_model_matches_query(model: &ApiModel, query: &str) -> bool {
+    let description = model_description(model).unwrap_or_default();
+    let fields = [
+        model.id.as_str(),
+        model.author.as_deref().unwrap_or_default(),
+        model.pipeline_tag.as_deref().unwrap_or_default(),
+        model.library_name.as_deref().unwrap_or_default(),
+        description.as_str(),
+    ];
+    let languages = model_languages(model).join(" ");
+    let architecture = model_architecture(model);
+    let license = model_license(model);
+    query.split_whitespace().map(str::to_lowercase).all(|term| {
+        fields
+            .iter()
+            .any(|field| field.to_lowercase().contains(&term))
+            || [languages.as_str(), architecture.as_str(), license.as_str()]
+                .iter()
+                .any(|field| field.to_lowercase().contains(&term))
+            || model
+                .tags
+                .iter()
+                .any(|tag| tag.to_lowercase().contains(&term))
+    })
+}
+
+fn model_tags(model: &ApiModel) -> Vec<String> {
+    let mut tags = model.tags.clone();
+    if let Some(pipeline_tag) = model.pipeline_tag.as_ref() {
+        if !tags.contains(pipeline_tag) {
+            tags.push(pipeline_tag.clone());
+        }
+    }
+    if let Some(library) = model.library_name.as_deref() {
+        if !tags.iter().any(|tag| tag == library) {
+            tags.push(library.to_owned());
+        }
+    }
+    tags
+}
+
 fn model_license(model: &ApiModel) -> String {
     model
         .tags
@@ -1196,7 +1258,7 @@ mod tests {
         let model: ApiModel = serde_json::from_str(
             r#"{
                 "id":"author/model",
-                "tags":["text-to-speech"],
+                "tags":["text-to-speech","expressive"],
                 "cardData":{"language":["en","fr"],"license":"apache-2.0"},
                 "config":{"architectures":["SpeechModel"]}
             }"#,
@@ -1205,6 +1267,7 @@ mod tests {
         assert_eq!(model_languages(&model), ["en", "fr"]);
         assert_eq!(model_license(&model), "apache-2.0");
         assert_eq!(model_architecture(&model), "SpeechModel");
+        assert!(model_tags(&model).contains(&"expressive".to_owned()));
     }
 
     #[test]

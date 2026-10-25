@@ -1,4 +1,4 @@
-import { Button, ComboBox, HorizontalBox, LineEdit, ScrollView, VerticalBox } from "std-widgets.slint";
+import { Button, HorizontalBox, LineEdit, ScrollView, VerticalBox } from "std-widgets.slint";
 
 export struct HubModel {
     id: string,
@@ -7,6 +7,7 @@ export struct HubModel {
     category-label: string,
     description: string,
     languages: string,
+    tags: string,
     framework: string,
     architecture: string,
     size-label: string,
@@ -94,7 +95,7 @@ export component ModelsTab inherits Rectangle {
                     text <=> root.query;
                     height: 32px;
                     horizontal-stretch: 1;
-                    placeholder-text: "Search models, authors, tasks, languages, or architecture";
+                    placeholder-text: "Search model names, descriptions, languages, tags, or architecture";
                     accepted => {
                         root.refresh-models(root.query, root.active-category, "",
                             root.language-filter, "", "");
@@ -109,82 +110,7 @@ export component ModelsTab inherits Rectangle {
                             root.language-filter, "", "");
                     }
                 }
-                language-selector := ComboBox {
-                    model: root.language-option-labels;
-                    current-value: root.language-filter == "" ? "All languages" : root.language-label + " (" + root.language-filter + ")";
-                    horizontal-stretch: 1;
-                    selected(value) => {
-                        let index = language-selector.current-index;
-                        if (index >= 0 && index < root.language-options.length) {
-                            let language = root.language-options[index];
-                            root.language-filter = language.code;
-                            root.language-label = language.name;
-                            root.active-category = "languages";
-                            root.refresh-models(root.query, root.active-category, "",
-                                root.language-filter, "", "");
-                        }
-                    }
-                }
-                // LineEdit {
-                //     text <=> root.language-search;
-                //     height: 30px;
-                //     width: 210px;
-                //     placeholder-text: "Find a language by name or code";
-                //     accepted => {
-                //         root.search-languages(root.language-search);
-                //     }
-                // }
-                Button {
-                    text: "🔍";
-                    width: 32px;
-                    height: 30px;
-                    clicked => {
-                        root.search-languages(root.language-search);
-                    }
-                }
             }
-            // HorizontalBox {
-            //     spacing: 6px;
-            //     Text {
-            //         text: "Languages";
-            //         color: root.theme == "dark" ? #cbd5e1 : #475569;
-            //         font-weight: 600;
-            //         vertical-alignment: center;
-            //     }
-            //     language-selector := ComboBox {
-            //         model: root.language-option-labels;
-            //         current-value: root.language-filter == "" ? "All languages" : root.language-label + " (" + root.language-filter + ")";
-            //         horizontal-stretch: 1;
-            //         selected(value) => {
-            //             let index = language-selector.current-index;
-            //             if (index >= 0 && index < root.language-options.length) {
-            //                 let language = root.language-options[index];
-            //                 root.language-filter = language.code;
-            //                 root.language-label = language.name;
-            //                 root.active-category = "languages";
-            //                 root.refresh-models(root.query, root.active-category, "",
-            //                     root.language-filter, "", "");
-            //             }
-            //         }
-            //     }
-            //     // LineEdit {
-            //     //     text <=> root.language-search;
-            //     //     height: 30px;
-            //     //     width: 210px;
-            //     //     placeholder-text: "Find a language by name or code";
-            //     //     accepted => {
-            //     //         root.search-languages(root.language-search);
-            //     //     }
-            //     // }
-            //     Button {
-            //         text: "🔍";
-            //         width: 32px;
-            //         height: 30px;
-            //         clicked => {
-            //             root.search-languages(root.language-search);
-            //         }
-            //     }
-            // }
         }
 
         if root.download-progress-text != "": VerticalBox {
@@ -219,7 +145,7 @@ export component ModelsTab inherits Rectangle {
             VerticalBox {
                 spacing: 8px;
                 for model in root.models: Rectangle {
-                    height: 240px;
+                    height: 260px;
                     background: root.theme == "dark" ? #222a38 : #f8fafc;
                     border-color: root.theme == "dark" ? #384357 : #e2e8f0;
                     border-width: 1px;
@@ -257,6 +183,11 @@ export component ModelsTab inherits Rectangle {
                         Text {
                             text: "Languages: " + model.languages + "    Framework: " + model.framework;
                             color: root.theme == "dark" ? #cbd5e1 : #475569;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: "Tags: " + model.tags;
+                            color: root.theme == "dark" ? #aab4c5 : #64748b;
                             overflow: elide;
                         }
                         Text {
