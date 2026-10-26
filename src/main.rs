@@ -182,6 +182,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         set_active_model_download(weak.clone(), id.clone());
         set_model_download_progress_text(weak.clone(), "Preparing download…".into());
         set_model_download_progress(weak.clone(), 0.0);
+        set_model_download_progress_indeterminate(weak.clone(), true);
         set_status(weak.clone(), format!("Preparing download for {id}…"));
         thread::spawn(move || {
             let progress_weak = weak.clone();
@@ -202,14 +203,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     } else {
                         String::new()
                     };
-                    let percent = if total == 0 {
-                        "Progress unavailable".to_owned()
+                    let progress_label = if total == 0 {
+                        "Downloading".to_owned()
                     } else {
                         format!("{}%", (percentage * 100.0).round() as u32)
                     };
                     let text = format!(
                         "{} · {} / {} · {}/s{} · {}",
-                        percent,
+                        progress_label,
                         tts::models::format_bytes(downloaded),
                         if total == 0 {
                             "unknown size".into()
@@ -224,6 +225,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Err(error) = slint::invoke_from_event_loop(move || {
                         if let Some(app) = progress_tick_weak.upgrade() {
                             app.set_model_download_progress(percentage);
+                            app.set_model_download_progress_indeterminate(total == 0);
                             app.set_model_download_progress_text(text.into());
                         }
                     }) {
@@ -234,6 +236,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             match result {
                 Ok(path) => {
                     set_active_model_download(weak.clone(), String::new());
+                    set_model_download_progress(weak.clone(), 1.0);
+                    set_model_download_progress_indeterminate(weak.clone(), false);
                     set_status(
                         weak.clone(),
                         format!("Model installed and verified at {}.", path.display()),
@@ -254,6 +258,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Err(error) => {
                     set_active_model_download(weak.clone(), String::new());
+                    set_model_download_progress_indeterminate(weak.clone(), false);
                     let message = error.to_string();
                     set_model_download_progress_text(
                         weak.clone(),
@@ -824,6 +829,16 @@ fn set_model_download_progress(weak: slint::Weak<AppWindow>, progress: f32) {
         }
     }) {
         eprintln!("Could not update model download progress: {error}");
+    }
+}
+
+fn set_model_download_progress_indeterminate(weak: slint::Weak<AppWindow>, indeterminate: bool) {
+    if let Err(error) = slint::invoke_from_event_loop(move || {
+        if let Some(app) = weak.upgrade() {
+            app.set_model_download_progress_indeterminate(indeterminate);
+        }
+    }) {
+        eprintln!("Could not update model download progress mode: {error}");
     }
 }
 

@@ -32,6 +32,7 @@ export component AppWindow inherits Window {
     in property <[string]> language-option-labels: [];
     in-out property <string> model-download-progress-text: "";
     in-out property <float> model-download-progress: 0;
+    in-out property <bool> model-download-progress-indeterminate: false;
     in-out property <string> active-model-download-id: "";
 
     callback speak(string);
@@ -121,6 +122,7 @@ export component AppWindow inherits Window {
                 }
                 download-progress-text <=> root.model-download-progress-text;
                 download-progress <=> root.model-download-progress;
+                download-progress-indeterminate: root.model-download-progress-indeterminate;
                 active-download-id <=> root.active-model-download-id;
                 download-model(model) => {
                     root.download-model(model);

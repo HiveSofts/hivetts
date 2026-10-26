@@ -1,4 +1,4 @@
-import { Button, HorizontalBox, LineEdit, ScrollView, VerticalBox } from "std-widgets.slint";
+import { Button, HorizontalBox, LineEdit, ProgressIndicator, ScrollView, VerticalBox } from "std-widgets.slint";
 
 export struct HubModel {
     id: string,
@@ -34,6 +34,7 @@ export component ModelsTab inherits Rectangle {
     in-out property <string> active-category: "all";
     in-out property <string> download-progress-text: "";
     in-out property <float> download-progress: 0;
+    in property <bool> download-progress-indeterminate: false;
     in-out property <string> active-download-id: "";
     in-out property <string> pending-delete-id: "";
     callback refresh-models(string, string, string, string, string, string);
@@ -121,31 +122,32 @@ export component ModelsTab inherits Rectangle {
             }
         }
 
-        if root.download-progress-text != "": VerticalBox {
-            spacing: 4px;
-            HorizontalBox {
+        if root.download-progress-text != "": Rectangle {
+            background: root.theme == "dark" ? #242b3a : #f5f3ff;
+            border-color: root.theme == "dark" ? #453d67 : #ddd6fe;
+            border-width: 1px;
+            border-radius: 8px;
+            VerticalBox {
+                padding: 10px;
                 spacing: 6px;
-                Text {
-                    text: root.download-progress-text;
-                    color: root.theme == "dark" ? #ddd6fe : #5b21b6;
-                    wrap: word-wrap;
-                    horizontal-stretch: 1;
+                HorizontalBox {
+                    spacing: 10px;
+                    Text {
+                        text: root.download-progress-text;
+                        color: root.theme == "dark" ? #e2e8f0 : #334155;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                    if root.active-download-id != "": Button {
+                        text: "Cancel";
+                        height: 26px;
+                        clicked => { root.cancel-download(root.active-download-id); }
+                    }
                 }
-                if root.active-download-id != "": Button {
-                    text: "Cancel";
-                    height: 26px;
-                    clicked => { root.cancel-download(root.active-download-id); }
-                }
-            }
-            Rectangle {
-                height: 6px;
-                background: root.theme == "dark" ? #303748 : #e2e8f0;
-                border-radius: 3px;
-                Rectangle {
-                    width: parent.width * root.download-progress;
-                    height: parent.height;
-                    background: #8b5cf6;
-                    border-radius: 3px;
+                ProgressIndicator {
+                    height: 6px;
+                    progress: root.download-progress;
+                    indeterminate: root.download-progress-indeterminate;
                 }
             }
         }
