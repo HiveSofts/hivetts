@@ -1,4 +1,4 @@
-import { Button, LineEdit, Slider, VerticalBox } from "std-widgets.slint";
+import { LineEdit, Slider, VerticalBox } from "std-widgets.slint";
 
 export component SettingsTab inherits Rectangle {
     in property <string> theme: "system";
@@ -7,8 +7,6 @@ export component SettingsTab inherits Rectangle {
     in-out property <string> piper-voice: "";
     in-out property <string> language: "auto";
     in-out property <float> speech-rate: 1.0;
-
-    callback toggle-theme();
 
     background: root.theme == "dark" ? #1f2937 : #ffffff;
     border-radius: 12px;
@@ -66,17 +64,7 @@ export component SettingsTab inherits Rectangle {
             value <=> root.speech-rate;
         }
         Text {
-            text: "Theme";
-            color: root.theme == "dark" ? #f8fafc : #334155;
-        }
-        Button {
-            text: root.theme == "dark" ? "Switch to light" : "Switch to dark";
-            clicked => {
-                root.toggle-theme();
-            }
-        }
-        Text {
-            text: "Changes are saved to your local HiveTTS settings file when you select Save settings.";
+            text: "Changes are saved automatically to your local HiveTTS settings file.";
             color: root.theme == "dark" ? #cbd5e1 : #64748b;
             wrap: word-wrap;
         }

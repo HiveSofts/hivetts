@@ -407,7 +407,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let settings = runtime_config(&app);
         drop(app);
         match settings.save() {
-            Ok(()) => set_status(weak.clone(), "Settings saved locally.".into()),
+            Ok(()) => {}
             Err(error) => set_status(weak.clone(), format!("Could not save settings: {error}")),
         }
     });

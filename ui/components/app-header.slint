@@ -3,9 +3,9 @@ import { Button, HorizontalBox, VerticalBox } from "std-widgets.slint";
 export component AppHeader inherits HorizontalBox {
     in property <string> theme: "system";
     callback toggle-theme();
-    callback save-settings();
 
     alignment: space-between;
+    height: 64px;
 
     VerticalBox {
         spacing: 2px;
@@ -25,12 +25,6 @@ export component AppHeader inherits HorizontalBox {
         text: root.theme == "dark" ? "Light theme" : "Dark theme";
         clicked => {
             root.toggle-theme();
-        }
-    }
-    Button {
-        text: "Save settings";
-        clicked => {
-            root.save-settings();
         }
     }
 }

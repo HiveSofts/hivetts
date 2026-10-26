@@ -56,6 +56,25 @@ export component AppWindow inherits Window {
         root.update-text-stats(root.speech-text);
     }
 
+    changed model-path => {
+        root.save-settings();
+    }
+    changed piper-executable => {
+        root.save-settings();
+    }
+    changed piper-voice => {
+        root.save-settings();
+    }
+    changed language => {
+        root.save-settings();
+    }
+    changed speech-rate => {
+        root.save-settings();
+    }
+    changed theme => {
+        root.save-settings();
+    }
+
     background: root.theme == "dark" ? #111827 : #f5f7fb;
 
     Rectangle {
@@ -70,13 +89,11 @@ export component AppWindow inherits Window {
                 toggle-theme => {
                     root.theme = root.theme == "dark" ? "light" : "dark";
                 }
-                save-settings => {
-                    root.save-settings();
-                }
             }
 
             TabNavigation {
                 current-tab <=> root.current-tab;
+                theme: root.theme;
             }
 
             if root.current-tab == "tts": TextToSpeechTab {
@@ -154,9 +171,6 @@ export component AppWindow inherits Window {
                 piper-voice <=> root.piper-voice;
                 language <=> root.language;
                 speech-rate <=> root.speech-rate;
-                toggle-theme => {
-                    root.theme = root.theme == "dark" ? "light" : "dark";
-                }
             }
 
             StatusBar {

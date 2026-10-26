@@ -1,32 +1,86 @@
-import { Button, HorizontalBox } from "std-widgets.slint";
+import { HorizontalBox } from "std-widgets.slint";
 
 export component TabNavigation inherits HorizontalBox {
     in-out property <string> current-tab: "tts";
+    in property <string> theme: "system";
 
-    spacing: 8px;
+    spacing: 6px;
+    height: 40px;
 
-    Button {
-        text: "Text to Speech";
-        clicked => {
-            root.current-tab = "tts";
+    Rectangle {
+        width: 140px;
+        height: 40px;
+        background: root.current-tab == "tts" ? #4f46e5 : #00000000;
+        border-radius: 8px;
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: "Text to Speech";
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: root.current-tab == "tts" ? #ffffff : (root.theme == "dark" ? #cbd5e1 : #475569);
+        }
+        TouchArea {
+            clicked => {
+                root.current-tab = "tts";
+            }
         }
     }
-    Button {
-        text: "Speech to Text";
-        clicked => {
-            root.current-tab = "stt";
+    Rectangle {
+        width: 140px;
+        height: 40px;
+        background: root.current-tab == "stt" ? #4f46e5 : #00000000;
+        border-radius: 8px;
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: "Speech to Text";
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: root.current-tab == "stt" ? #ffffff : (root.theme == "dark" ? #cbd5e1 : #475569);
+        }
+        TouchArea {
+            clicked => {
+                root.current-tab = "stt";
+            }
         }
     }
-    Button {
-        text: "Models";
-        clicked => {
-            root.current-tab = "models";
+    Rectangle {
+        width: 100px;
+        height: 40px;
+        background: root.current-tab == "models" ? #4f46e5 : #00000000;
+        border-radius: 8px;
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: "Models";
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: root.current-tab == "models" ? #ffffff : (root.theme == "dark" ? #cbd5e1 : #475569);
+        }
+        TouchArea {
+            clicked => {
+                root.current-tab = "models";
+            }
         }
     }
-    Button {
-        text: "Settings";
-        clicked => {
-            root.current-tab = "settings";
+    Rectangle {
+        width: 100px;
+        height: 40px;
+        background: root.current-tab == "settings" ? #4f46e5 : #00000000;
+        border-radius: 8px;
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: "Settings";
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: root.current-tab == "settings" ? #ffffff : (root.theme == "dark" ? #cbd5e1 : #475569);
+        }
+        TouchArea {
+            clicked => {
+                root.current-tab = "settings";
+            }
         }
     }
 }
