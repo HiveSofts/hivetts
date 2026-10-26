@@ -47,9 +47,18 @@ export component ModelsTab inherits Rectangle {
 
     in property <[LanguageOption]> language-options: [];
     in property <[string]> language-option-labels: [];
+    property <int> card-columns: root.width < 720px ? 1 : 2;
+    property <length> card-width: root.width < 720px
+        ? max(0px, root.width - 48px)
+        : (root.width - 74px) / 2;
 
     changed language-search => {
         root.search-languages(root.language-search);
+    }
+
+    changed query => {
+        root.refresh-models(root.query, root.active-category, "",
+            root.language-filter, "", "");
     }
 
     background: root.theme == "dark" ? #1b202b : #ffffff;
@@ -65,15 +74,18 @@ export component ModelsTab inherits Rectangle {
             spacing: 10px;
             VerticalBox {
                 spacing: 2px;
+                horizontal-stretch: 1;
                 Text {
                     text: "Hugging Face Model Hub";
                     font-size: 21px;
                     font-weight: 700;
                     color: root.theme == "dark" ? #f8fafc : #172338;
+                    wrap: word-wrap;
                 }
                 Text {
                     text: "Discover and manage speech models on this device";
                     color: root.theme == "dark" ? #aab4c5 : #64748b;
+                    wrap: word-wrap;
                 }
             }
             Rectangle { }
@@ -95,11 +107,7 @@ export component ModelsTab inherits Rectangle {
                     text <=> root.query;
                     height: 32px;
                     horizontal-stretch: 1;
-                    placeholder-text: "Search model names, descriptions, languages, tags, or architecture";
-                    accepted => {
-                        root.refresh-models(root.query, root.active-category, "",
-                            root.language-filter, "", "");
-                    }
+                    placeholder-text: "Search models";
                 }
                 Button {
                     text: "🔍";
@@ -120,7 +128,8 @@ export component ModelsTab inherits Rectangle {
                 Text {
                     text: root.download-progress-text;
                     color: root.theme == "dark" ? #ddd6fe : #5b21b6;
-                    overflow: elide;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
                 }
                 if root.active-download-id != "": Button {
                     text: "Cancel";
@@ -142,15 +151,21 @@ export component ModelsTab inherits Rectangle {
         }
 
         ScrollView {
-            VerticalBox {
-                spacing: 8px;
-                for model in root.models: Rectangle {
-                    height: 260px;
+            content-width: root.width - 32px;
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            GridLayout {
+                spacing: 10px;
+                for model[index] in root.models: Rectangle {
+                    row: index / root.card-columns;
+                    col: Math.mod(index, root.card-columns);
+                    width: root.card-width;
                     background: root.theme == "dark" ? #222a38 : #f8fafc;
                     border-color: root.theme == "dark" ? #384357 : #e2e8f0;
                     border-width: 1px;
                     border-radius: 9px;
                     VerticalBox {
+                        min-width: 0px;
                         padding: 10px;
                         spacing: 4px;
                         HorizontalBox {
@@ -160,66 +175,88 @@ export component ModelsTab inherits Rectangle {
                                 font-size: 16px;
                                 font-weight: 650;
                                 color: root.theme == "dark" ? #f8fafc : #172338;
-                                overflow: elide;
+                                wrap: word-wrap;
+                                horizontal-stretch: 1;
                             }
-                            Rectangle { }
                             Text {
                                 text: model.installed ? "INSTALLED" : "HUGGING FACE";
                                 color: model.installed ? #34d399 : #a78bfa;
                                 font-size: 11px;
                                 font-weight: 700;
+                                wrap: word-wrap;
                             }
                         }
                         Text {
                             text: model.author + "  ·  " + model.category-label;
                             color: root.theme == "dark" ? #cbd5e1 : #475569;
-                            overflow: elide;
-                        }
-                        Text {
-                            text: model.description;
-                            color: root.theme == "dark" ? #aab4c5 : #64748b;
-                            overflow: elide;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
                         }
                         Text {
                             text: "Languages: " + model.languages + "    Framework: " + model.framework;
                             color: root.theme == "dark" ? #cbd5e1 : #475569;
-                            overflow: elide;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
                         }
+                        // Text {
+                        //     text: "Tags: " + model.tags;
+                        //     color: root.theme == "dark" ? #aab4c5 : #64748b;
+                        //     wrap: word-wrap;
+                        //     horizontal-stretch: 1;
+                        // }
                         Text {
-                            text: "Tags: " + model.tags;
-                            color: root.theme == "dark" ? #aab4c5 : #64748b;
-                            overflow: elide;
-                        }
-                        Text {
-                            text: "Architecture: " + model.architecture + "    Size: " + model.size-label;
+                            text: "Architecture: " + model.architecture;
                             color: root.theme == "dark" ? #cbd5e1 : #475569;
-                            overflow: elide;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
                         }
                         Text {
-                            text: model.stats + "    License: " + model.license;
+                            text: model.stats;
                             color: root.theme == "dark" ? #cbd5e1 : #475569;
-                            overflow: elide;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
                         }
                         Text {
-                            text: model.compatibility;
+                            text: "File size: " + model.size-label;
+                            color: root.theme == "dark" ? #cbd5e1 : #475569;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                        }
+                        Text {
+                            text: "License: " + model.license;
+                            color: root.theme == "dark" ? #cbd5e1 : #475569;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                        }
+                        Text {
+                            text: "Hardware compatibility: " + model.compatibility;
                             color: model.compatibility == "Compatible" ? #34d399 : #fbbf24;
-                            overflow: elide;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
                         }
                         if model.installed: Text {
                             text: "Local: " + model.local-path;
                             color: root.theme == "dark" ? #aab4c5 : #64748b;
-                            overflow: elide;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
                         }
-                        HorizontalBox {
+                        VerticalBox {
+                            min-width: 0px;
                             spacing: 6px;
                             if model.installed: Button {
                                 text: "Open Folder";
                                 height: 28px;
+                                horizontal-stretch: 1;
+                                min-width: 0px;
+                                max-width: root.card-width - 20px;
                                 clicked => { root.open-model-folder(model.local-path); }
                             }
                             if model.installed && model.deletable: Button {
                                 text: root.pending-delete-id == model.id ? "Confirm delete" : "Delete";
                                 height: 28px;
+                                horizontal-stretch: 1;
+                                min-width: 0px;
+                                max-width: root.card-width - 20px;
                                 clicked => {
                                     if (root.pending-delete-id == model.id) {
                                         root.delete-model(model.id);
@@ -232,17 +269,26 @@ export component ModelsTab inherits Rectangle {
                             if model.installed && model.deletable && root.pending-delete-id == model.id: Button {
                                 text: "Keep";
                                 height: 28px;
+                                horizontal-stretch: 1;
+                                min-width: 0px;
+                                max-width: root.card-width - 20px;
                                 clicked => { root.pending-delete-id = ""; }
                             }
                             if !model.installed: Button {
                                 text: "Download";
                                 height: 28px;
+                                horizontal-stretch: 1;
+                                min-width: 0px;
+                                max-width: root.card-width - 20px;
                                 enabled: root.active-download-id == "";
                                 clicked => { root.download-hub-model(model.id, model.task); }
                             }
                             Button {
                                 text: "View on Hugging Face";
                                 height: 28px;
+                                horizontal-stretch: 1;
+                                min-width: 0px;
+                                max-width: root.card-width - 20px;
                                 clicked => { root.open-hub-repository(model.id); }
                             }
                         }

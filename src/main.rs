@@ -6,7 +6,9 @@ use std::{
     io::{self, Write},
     path::PathBuf,
     process::Command,
+    sync::atomic::{AtomicU64, Ordering},
     thread,
+    time::Duration,
 };
 use tts::{
     audio,
@@ -14,6 +16,8 @@ use tts::{
     stt::{SpeechRecognizer, WhisperCliRecognizer},
     tts::{LocalSynthesizer, SpeechSynthesizer},
 };
+
+static MODEL_SEARCH_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Deserialize)]
 struct LanguageOptionData {
@@ -565,26 +569,37 @@ fn load_model_cards(
     framework: String,
     hardware: String,
 ) {
+    let generation = MODEL_SEARCH_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
     set_status(weak.clone(), "Loading model catalog…".into());
     thread::spawn(move || {
+        thread::sleep(Duration::from_millis(250));
+        if generation != MODEL_SEARCH_GENERATION.load(Ordering::Relaxed) {
+            return;
+        }
         let models = if category == "installed" {
             tts::models::installed_models()
         } else {
             tts::models::discover_models(&query, &category)
         };
+        if generation != MODEL_SEARCH_GENERATION.load(Ordering::Relaxed) {
+            return;
+        }
         match models {
             Ok(models) => {
                 match filter_models(
                     models, &query, &category, &max_size, &language, &framework, &hardware,
                 ) {
-                    Ok(models) => set_model_cards(weak, models),
-                    Err(message) => set_status(weak, message),
+                    Ok(models) => set_model_cards(weak, models, generation),
+                    Err(message) => set_model_search_status(weak, generation, message),
                 }
             }
             Err(error) => {
                 let message = format!("Could not load the model catalog: {error}");
                 match tts::models::installed_models() {
                     Ok(installed) => {
+                        if generation != MODEL_SEARCH_GENERATION.load(Ordering::Relaxed) {
+                            return;
+                        }
                         let installed = installed
                             .into_iter()
                             .filter(|model| {
@@ -599,13 +614,15 @@ fn load_model_cards(
                             installed, &query, &category, &max_size, &language, &framework,
                             &hardware,
                         ) {
-                            Ok(installed) => set_model_cards(weak.clone(), installed),
-                            Err(filter_error) => set_status(weak.clone(), filter_error),
+                            Ok(installed) => set_model_cards(weak.clone(), installed, generation),
+                            Err(filter_error) => {
+                                set_model_search_status(weak.clone(), generation, filter_error)
+                            }
                         }
                     }
                     Err(scan_error) => eprintln!("Could not scan installed models: {scan_error}"),
                 }
-                set_status(weak, message);
+                set_model_search_status(weak, generation, message);
             }
         }
     });
@@ -690,7 +707,11 @@ fn has_language_metadata(languages: &str) -> bool {
         && !languages.eq_ignore_ascii_case("not specified")
 }
 
-fn set_model_cards(weak: slint::Weak<AppWindow>, models: Vec<tts::models::HubModel>) {
+fn set_model_cards(
+    weak: slint::Weak<AppWindow>,
+    models: Vec<tts::models::HubModel>,
+    generation: u64,
+) {
     let count = models.len();
     let cards = models
         .into_iter()
@@ -707,23 +728,13 @@ fn set_model_cards(weak: slint::Weak<AppWindow>, models: Vec<tts::models::HubMod
             languages: model.languages.into(),
             framework: model.framework.into(),
             architecture: model.architecture.into(),
-            tags: model
-                .tags
-                .into_iter()
-                .take(6)
-                .collect::<Vec<_>>()
-                .join(", ")
-                .into(),
+            tags: model.tags.into_iter().collect::<Vec<_>>().join(", ").into(),
             size_label: if model.size_bytes == 0 {
                 "Unknown".into()
             } else {
                 tts::models::format_bytes(model.size_bytes).into()
             },
-            stats: if model.downloads == 0 && model.likes == 0 {
-                "Usage stats unavailable".into()
-            } else {
-                format!("{} downloads · {} likes", model.downloads, model.likes).into()
-            },
+            stats: format!("Downloads: {} · Likes: {}", model.downloads, model.likes).into(),
             license: model.license.into(),
             compatibility: model.compatibility.into(),
             installed: model.installed,
@@ -732,6 +743,9 @@ fn set_model_cards(weak: slint::Weak<AppWindow>, models: Vec<tts::models::HubMod
         })
         .collect::<Vec<_>>();
     if let Err(error) = slint::invoke_from_event_loop(move || {
+        if generation != MODEL_SEARCH_GENERATION.load(Ordering::Relaxed) {
+            return;
+        }
         if let Some(app) = weak.upgrade() {
             app.set_model_cards(slint::ModelRc::new(slint::VecModel::from(cards)));
             app.set_status_text(if count == 0 {
@@ -742,6 +756,18 @@ fn set_model_cards(weak: slint::Weak<AppWindow>, models: Vec<tts::models::HubMod
         }
     }) {
         eprintln!("Could not update model list: {error}");
+    }
+}
+
+fn set_model_search_status(weak: slint::Weak<AppWindow>, generation: u64, message: String) {
+    if let Err(error) = slint::invoke_from_event_loop(move || {
+        if generation == MODEL_SEARCH_GENERATION.load(Ordering::Relaxed) {
+            if let Some(app) = weak.upgrade() {
+                app.set_status_text(message.into());
+            }
+        }
+    }) {
+        eprintln!("Could not update model search status: {error}");
     }
 }
 
