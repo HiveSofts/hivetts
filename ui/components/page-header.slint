@@ -1,0 +1,46 @@
+// Page title block used at the top of each workspace card.
+export component PageHeader inherits HorizontalLayout {
+    in property <string> theme: "system";
+    in property <string> title: "";
+    in property <string> subtitle: "";
+    in property <string> badge-text: "";
+    in property <color> badge-color: #4f46e5;
+
+    property <color> palette-text: root.theme == "dark" ? #f1f5f9 : #0f1b2d;
+    property <color> palette-muted: root.theme == "dark" ? #8c98ab : #64748b;
+
+    spacing: 12px;
+    alignment: space-between;
+
+    VerticalLayout {
+        spacing: 2px;
+        horizontal-stretch: 1;
+        Text {
+            text: root.title;
+            font-size: 21px;
+            font-weight: 700;
+            color: root.palette-text;
+        }
+        Text {
+            text: root.subtitle;
+            font-size: 13px;
+            color: root.palette-muted;
+            wrap: word-wrap;
+        }
+    }
+    if root.badge-text != "": Rectangle {
+        width: 92px;
+        height: 26px;
+        y: 9px;
+        border-radius: 13px;
+        background: root.badge-color;
+        lbl := Text {
+            text: root.badge-text;
+            font-size: 11px;
+            font-weight: 700;
+            color: #ffffff;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}

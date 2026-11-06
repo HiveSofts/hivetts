@@ -1,67 +1,192 @@
-import { Button, HorizontalBox, LineEdit, TextEdit, VerticalBox } from "std-widgets.slint";
+import { Button, LineEdit, ScrollView, Slider, VerticalBox } from "std-widgets.slint";
+import { PageHeader } from "../components/page-header.slint";
 
+// Workspace card for microphone recording, file transcription, and voice settings.
 export component SpeechToTextTab inherits Rectangle {
     in property <string> theme: "system";
+    in property <string> transcript-text: "";
     in property <bool> is-recording: false;
-    in-out property <string> transcript-text: "";
     in-out property <string> audio-file-path: "";
+    in-out property <string> model-path: "";
+    in-out property <string> piper-executable: "";
+    in-out property <string> piper-voice: "";
+    in-out property <string> language: "auto";
+    in-out property <float> speech-rate: 1.0;
 
     callback start-recording();
     callback stop-recording();
     callback transcribe-file(string);
 
-    background: root.theme == "dark" ? #1f2937 : #ffffff;
-    border-radius: 12px;
+    property <color> palette-surface: root.theme == "dark" ? #161e2c : #ffffff;
+    property <color> palette-border: root.theme == "dark" ? #2c3a52 : #e2e8f0;
+    property <color> palette-muted: root.theme == "dark" ? #8c98ab : #64748b;
+    property <color> palette-text: root.theme == "dark" ? #f1f5f9 : #0f1b2d;
+    property <color> palette-field: root.theme == "dark" ? #101722 : #f8fafc;
+    property <color> palette-danger: #dc2626;
+
+    background: root.palette-surface;
+    border-radius: 14px;
     border-width: 1px;
-    border-color: root.theme == "dark" ? #334155 : #e2e8f0;
+    border-color: root.palette-border;
 
     VerticalBox {
-        padding: 18px;
+        padding: 22px;
         spacing: 12px;
-        Text {
-            text: "Speech to Text";
-            font-size: 20px;
-            font-weight: 650;
-            color: root.theme == "dark" ? #f8fafc : #172338;
+
+        PageHeader {
+            theme: root.theme;
+            title: "Speech to Text";
+            subtitle: "Record from the microphone or transcribe an audio file with whisper.cpp.";
+            badge-text: root.is-recording ? "RECORDING" : "STT";
+            badge-color: root.is-recording ? root.palette-danger : #0d9488;
         }
-        Text {
-            text: "Record from your default microphone or transcribe an audio file with whisper.cpp.";
-            color: root.theme == "dark" ? #cbd5e1 : #64748b;
-            wrap: word-wrap;
-        }
-        HorizontalBox {
-            spacing: 8px;
+
+        // Recording controls
+        HorizontalLayout {
+            spacing: 10px;
             Button {
-                text: root.is-recording ? "Stop and transcribe" : "Start microphone";
+                text: root.is-recording ? "● Recording…" : "● Start recording";
+                height: 42px;
+                enabled: !root.is-recording;
                 clicked => {
-                    if (root.is-recording) {
-                        root.stop-recording();
-                    } else {
-                        root.start-recording();
+                    root.start-recording();
+                }
+            }
+            Button {
+                text: "■ Stop";
+                height: 42px;
+                enabled: root.is-recording;
+                clicked => {
+                    root.stop-recording();
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        Rectangle {
+            height: 46px;
+            border-radius: 10px;
+            background: root.palette-field;
+            border-width: 1px;
+            border-color: root.palette-border;
+            HorizontalLayout {
+                padding: 7px;
+                spacing: 8px;
+                LineEdit {
+                    text <=> root.audio-file-path;
+                    placeholder-text: "Path to an audio file (wav, mp3, …)";
+                    horizontal-stretch: 1;
+                }
+                Button {
+                    text: "Transcribe";
+                    clicked => {
+                        root.transcribe-file(root.audio-file-path);
                     }
                 }
             }
-            LineEdit {
-                text <=> root.audio-file-path;
-                placeholder-text: "Audio file path (WAV/MP3/FLAC/OGG)";
+        }
+
+        Text {
+            text: "TRANSCRIPT";
+            font-size: 10px;
+            font-weight: 700;
+            color: root.palette-muted;
+        }
+        ScrollView {
+            min-height: 150px;
+            vertical-stretch: 1;
+            Text {
+                text: root.transcript-text == "" ? "The transcript will appear here." : root.transcript-text;
+                color: root.transcript-text == "" ? root.palette-muted : root.palette-text;
+                font-size: 15px;
+                wrap: word-wrap;
+                width: parent.width - 2px;
             }
-            Button {
-                text: "Transcribe file";
-                clicked => {
-                    root.transcribe-file(root.audio-file-path);
+        }
+
+        Rectangle { height: 1px; background: root.palette-border; }
+
+        // Voice and engine settings
+        Text {
+            text: "VOICE & ENGINE SETTINGS";
+            font-size: 10px;
+            font-weight: 700;
+            color: root.palette-muted;
+        }
+        HorizontalLayout {
+            spacing: 14px;
+            Text {
+                text: "Speech rate";
+                color: root.palette-text;
+                vertical-alignment: center;
+            }
+            Slider {
+                value <=> root.speech-rate;
+                minimum: 0.5;
+                maximum: 2.0;
+                step: 0.05;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: root.speech-rate + "x";
+                color: root.palette-muted;
+                vertical-alignment: center;
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: "Language";
+                color: root.palette-text;
+                vertical-alignment: center;
+            }
+            LineEdit {
+                text <=> root.language;
+                placeholder-text: "auto or ISO code, e.g. en";
+                horizontal-stretch: 1;
+            }
+        }
+        Rectangle {
+            height: 46px;
+            border-radius: 10px;
+            background: root.palette-field;
+            border-width: 1px;
+            border-color: root.palette-border;
+            HorizontalLayout {
+                padding: 7px;
+                spacing: 8px;
+                LineEdit {
+                    text <=> root.model-path;
+                    placeholder-text: "Whisper model file (.ggml)";
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+        Rectangle {
+            height: 46px;
+            border-radius: 10px;
+            background: root.palette-field;
+            border-width: 1px;
+            border-color: root.palette-border;
+            HorizontalLayout {
+                padding: 7px;
+                spacing: 8px;
+                LineEdit {
+                    text <=> root.piper-executable;
+                    placeholder-text: "Piper executable path";
+                    horizontal-stretch: 2;
+                }
+                LineEdit {
+                    text <=> root.piper-voice;
+                    placeholder-text: "Piper voice (.onnx)";
+                    horizontal-stretch: 3;
                 }
             }
         }
         Text {
-            text: "Transcript";
-            font-size: 15px;
-            font-weight: 600;
-            color: root.theme == "dark" ? #f8fafc : #172338;
-        }
-        TextEdit {
-            text <=> root.transcript-text;
-            height: 260px;
-            font-size: 15px;
+            text: "Settings are saved automatically when changed.";
+            font-size: 11px;
+            color: root.palette-muted;
         }
     }
 }

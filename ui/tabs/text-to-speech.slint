@@ -1,5 +1,7 @@
-import { Button, HorizontalBox, LineEdit, TextEdit, VerticalBox } from "std-widgets.slint";
+import { Button, LineEdit, TextEdit, VerticalBox } from "std-widgets.slint";
+import { PageHeader } from "../components/page-header.slint";
 
+// Workspace card for speaking text and exporting WAV files.
 export component TextToSpeechTab inherits Rectangle {
     in property <string> theme: "system";
     in-out property <string> speech-text: "";
@@ -11,63 +13,96 @@ export component TextToSpeechTab inherits Rectangle {
     callback export-wav(string);
     callback load-text(string);
 
-    background: root.theme == "dark" ? #1f2937 : #ffffff;
-    border-radius: 12px;
+    property <color> palette-surface: root.theme == "dark" ? #161e2c : #ffffff;
+    property <color> palette-border: root.theme == "dark" ? #2c3a52 : #e2e8f0;
+    property <color> palette-muted: root.theme == "dark" ? #8c98ab : #64748b;
+    property <color> palette-field: root.theme == "dark" ? #101722 : #f8fafc;
+
+    background: root.palette-surface;
+    border-radius: 14px;
     border-width: 1px;
-    border-color: root.theme == "dark" ? #334155 : #e2e8f0;
+    border-color: root.palette-border;
 
     VerticalBox {
-        padding: 18px;
+        padding: 22px;
         spacing: 12px;
-        Text {
-            text: "Text to Speech";
-            font-size: 20px;
-            font-weight: 650;
-            color: root.theme == "dark" ? #f8fafc : #172338;
+
+        PageHeader {
+            theme: root.theme;
+            title: "Text to Speech";
+            subtitle: "Enter text or load a UTF-8 .txt file. Text stays on this device.";
+            badge-text: "TTS";
+            badge-color: #4f46e5;
         }
-        Text {
-            text: "Enter text or load a UTF-8 .txt file. Text stays on this device.";
-            color: root.theme == "dark" ? #cbd5e1 : #64748b;
-            wrap: word-wrap;
-        }
+
         TextEdit {
             text <=> root.speech-text;
-            height: 280px;
+            min-height: 240px;
             font-size: 16px;
+            wrap: word-wrap;
         }
+
         Text {
             text: root.text-stats;
-            color: root.theme == "dark" ? #cbd5e1 : #64748b;
+            font-size: 12px;
+            color: root.palette-muted;
         }
-        HorizontalBox {
-            spacing: 8px;
+
+        Rectangle {
+            height: 46px;
+            border-radius: 10px;
+            background: root.palette-field;
+            border-width: 1px;
+            border-color: root.palette-border;
+            HorizontalLayout {
+                padding: 7px;
+                spacing: 8px;
+                LineEdit {
+                    text <=> root.export-path;
+                    placeholder-text: "WAV output file path";
+                    horizontal-stretch: 1;
+                }
+                Button {
+                    text: "Export WAV";
+                    clicked => {
+                        root.export-wav(root.export-path);
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 46px;
+            border-radius: 10px;
+            background: root.palette-field;
+            border-width: 1px;
+            border-color: root.palette-border;
+            HorizontalLayout {
+                padding: 7px;
+                spacing: 8px;
+                LineEdit {
+                    text <=> root.text-file-path;
+                    placeholder-text: "Path to a UTF-8 .txt file";
+                    horizontal-stretch: 1;
+                }
+                Button {
+                    text: "Load text file";
+                    clicked => {
+                        root.load-text(root.text-file-path);
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: end;
             Button {
                 text: "Speak";
+                height: 42px;
+                primary: true;
                 clicked => {
                     root.speak(root.speech-text);
-                }
-            }
-            LineEdit {
-                text <=> root.export-path;
-                placeholder-text: "WAV output file path";
-            }
-            Button {
-                text: "Export WAV";
-                clicked => {
-                    root.export-wav(root.export-path);
-                }
-            }
-        }
-        HorizontalBox {
-            spacing: 8px;
-            LineEdit {
-                text <=> root.text-file-path;
-                placeholder-text: "Path to a UTF-8 .txt file";
-            }
-            Button {
-                text: "Load text file";
-                clicked => {
-                    root.load-text(root.text-file-path);
                 }
             }
         }

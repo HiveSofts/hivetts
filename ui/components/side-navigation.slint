@@ -1,0 +1,120 @@
+import { Button } from "std-widgets.slint";
+
+// Vertical navigation rail with brand, tab entries and a theme toggle.
+export component SideNavigation inherits Rectangle {
+    in property <string> theme: "system";
+    in-out property <string> current-tab: "tts";
+    in property <[string]> nav-ids: [];
+    in property <[string]> nav-labels: [];
+    callback toggle-theme();
+
+    property <color> palette-surface: root.theme == "dark" ? #0f172a : #ffffff;
+    property <color> palette-border: root.theme == "dark" ? #1e293b : #e2e8f0;
+    property <color> palette-text: root.theme == "dark" ? #f1f5f9 : #0f1b2d;
+    property <color> palette-muted: root.theme == "dark" ? #8c98ab : #64748b;
+    property <color> palette-accent: #4f46e5;
+
+    width: 220px;
+    background: root.palette-surface;
+    border-width: 1px;
+    border-color: root.palette-border;
+    border-radius: 14px;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+
+        // Brand block
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+            Rectangle {
+                width: 38px;
+                height: 38px;
+                border-radius: 11px;
+                background: root.palette-accent;
+                Text {
+                    text: "H";
+                    font-size: 19px;
+                    font-weight: 700;
+                    color: #ffffff;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            VerticalLayout {
+                spacing: 1px;
+                alignment: center;
+                Text {
+                    text: "HiveTTS";
+                    font-size: 19px;
+                    font-weight: 700;
+                    color: root.palette-text;
+                }
+                Text {
+                    text: "Local speech tools";
+                    font-size: 11px;
+                    color: root.palette-muted;
+                }
+            }
+        }
+
+        Rectangle { height: 1px; background: root.palette-border; }
+
+        Text {
+            text: "WORKSPACE";
+            font-size: 10px;
+            font-weight: 700;
+            color: root.palette-muted;
+        }
+
+        // Navigation entries
+        VerticalLayout {
+            spacing: 4px;
+            for nav[index] in root.nav-ids: Rectangle {
+                height: 42px;
+                border-radius: 10px;
+                background: root.current-tab == nav ? (root.theme == "dark" ? #27324a : #eef0fe) : transparent;
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.current-tab = nav; }
+                }
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 10px;
+                    alignment: start;
+                    Rectangle {
+                        width: 3px;
+                        height: 18px;
+                        border-radius: 2px;
+                        background: root.current-tab == nav ? root.palette-accent : transparent;
+                    }
+                    Text {
+                        text: root.nav-labels[index];
+                        vertical-alignment: center;
+                        color: root.current-tab == nav ? root.palette-text : root.palette-muted;
+                        font-weight: root.current-tab == nav ? 600 : 400;
+                    }
+                }
+            }
+        }
+
+        Rectangle { }
+
+        // Theme toggle pinned to the bottom of the rail
+        Button {
+            height: 36px;
+            text: root.theme == "dark" ? "Switch to light" : "Switch to dark";
+            clicked => {
+                root.toggle-theme();
+            }
+        }
+        Text {
+            horizontal-alignment: center;
+            text: "Privacy first · on-device";
+            font-size: 10px;
+            color: root.palette-muted;
+        }
+    }
+}

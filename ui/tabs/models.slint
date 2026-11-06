@@ -1,4 +1,5 @@
-import { Button, HorizontalBox, LineEdit, ProgressIndicator, ScrollView, VerticalBox } from "std-widgets.slint";
+import { Button, LineEdit, ProgressIndicator, ScrollView, VerticalBox } from "std-widgets.slint";
+import { PageHeader } from "../components/page-header.slint";
 
 export struct HubModel {
     id: string,
@@ -24,6 +25,7 @@ export struct LanguageOption {
     code: string,
 }
 
+// Workspace card for discovering and managing speech models.
 export component ModelsTab inherits Rectangle {
     in property <string> theme: "system";
     in-out property <[HubModel]> models: [];
@@ -48,10 +50,22 @@ export component ModelsTab inherits Rectangle {
 
     in property <[LanguageOption]> language-options: [];
     in property <[string]> language-option-labels: [];
-    property <int> card-columns: root.width < 720px ? 1 : 2;
-    property <length> card-width: root.width < 720px
-        ? max(0px, root.width - 48px)
-        : (root.width - 74px) / 2;
+    property <[string]> categories: ["all", "tts", "stt", "installed"];
+    property <[string]> category-labels: ["All", "TTS", "STT", "Installed"];
+    property <int> card-columns: root.width < 860px ? 1 : 2;
+    property <length> card-width: root.width < 860px
+        ? max(0px, root.width - 64px)
+        : (root.width - 90px) / 2;
+
+    property <color> palette-surface: root.theme == "dark" ? #161e2c : #ffffff;
+    property <color> palette-border: root.theme == "dark" ? #2c3a52 : #e2e8f0;
+    property <color> palette-muted: root.theme == "dark" ? #8c98ab : #64748b;
+    property <color> palette-text: root.theme == "dark" ? #f1f5f9 : #0f1b2d;
+    property <color> palette-card: root.theme == "dark" ? #1d2636 : #f8fafc;
+    property <color> palette-field: root.theme == "dark" ? #101722 : #f4f7fc;
+    property <color> palette-accent: #4f46e5;
+    property <color> palette-ok: #10b981;
+    property <color> palette-warn: #f59e0b;
 
     changed language-search => {
         root.search-languages(root.language-search);
@@ -62,37 +76,42 @@ export component ModelsTab inherits Rectangle {
             root.language-filter, "", "");
     }
 
-    background: root.theme == "dark" ? #1b202b : #ffffff;
-    border-radius: 12px;
+    background: root.palette-surface;
+    border-radius: 14px;
     border-width: 1px;
-    border-color: root.theme == "dark" ? #343b4b : #e2e8f0;
+    border-color: root.palette-border;
 
     VerticalBox {
-        padding: 16px;
-        spacing: 8px;
+        padding: 22px;
+        spacing: 12px;
 
-        HorizontalBox {
-            spacing: 10px;
-            VerticalBox {
-                spacing: 2px;
+        PageHeader {
+            theme: root.theme;
+            title: "Model Hub";
+            subtitle: "Discover and manage speech models on this device.";
+            badge-text: "HUGGING FACE";
+            badge-color: #7c3aed;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            LineEdit {
+                text <=> root.query;
+                height: 38px;
                 horizontal-stretch: 1;
-                Text {
-                    text: "Hugging Face Model Hub";
-                    font-size: 21px;
-                    font-weight: 700;
-                    color: root.theme == "dark" ? #f8fafc : #172338;
-                    wrap: word-wrap;
-                }
-                Text {
-                    text: "Discover and manage speech models on this device";
-                    color: root.theme == "dark" ? #aab4c5 : #64748b;
-                    wrap: word-wrap;
+                placeholder-text: "Search models by name, language, license…";
+            }
+            Button {
+                text: "Search";
+                height: 38px;
+                clicked => {
+                    root.refresh-models(root.query, root.active-category, "",
+                        root.language-filter, "", "");
                 }
             }
-            Rectangle { }
             Button {
                 text: "Refresh";
-                height: 28px;
+                height: 38px;
                 clicked => {
                     root.refresh-models(root.query, root.active-category, "",
                         root.language-filter, "", "");
@@ -100,41 +119,53 @@ export component ModelsTab inherits Rectangle {
             }
         }
 
-        VerticalBox {
+        // Category filter chips
+        HorizontalLayout {
             spacing: 6px;
-            HorizontalBox {
-                spacing: 6px;
-                LineEdit {
-                    text <=> root.query;
-                    height: 32px;
-                    horizontal-stretch: 1;
-                    placeholder-text: "Search models";
-                }
-                Button {
-                    text: "🔍";
-                    width: 32px;
-                    height: 32px;
+            alignment: start;
+            for category[index] in root.categories: Rectangle {
+                width: 78px;
+                height: 30px;
+                border-radius: 15px;
+                background: root.active-category == category
+                    ? root.palette-accent : root.palette-field;
+                border-width: 1px;
+                border-color: root.active-category == category
+                    ? root.palette-accent : root.palette-border;
+                TouchArea {
+                    mouse-cursor: pointer;
                     clicked => {
-                        root.refresh-models(root.query, root.active-category, "",
+                        root.active-category = category;
+                        root.refresh-models(root.query, category, "",
                             root.language-filter, "", "");
                     }
+                }
+                lbl := Text {
+                    text: root.category-labels[index];
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: root.active-category == category
+                        ? #ffffff : root.palette-muted;
                 }
             }
         }
 
+        // Download progress banner
         if root.download-progress-text != "": Rectangle {
-            background: root.theme == "dark" ? #242b3a : #f5f3ff;
+            background: root.theme == "dark" ? #221f3a : #f3f0ff;
             border-color: root.theme == "dark" ? #453d67 : #ddd6fe;
             border-width: 1px;
-            border-radius: 8px;
+            border-radius: 10px;
             VerticalBox {
-                padding: 10px;
+                padding: 12px;
                 spacing: 6px;
-                HorizontalBox {
+                HorizontalLayout {
                     spacing: 10px;
                     Text {
                         text: root.download-progress-text;
-                        color: root.theme == "dark" ? #e2e8f0 : #334155;
+                        color: root.theme == "dark" ? #e2e8f0 : #3b3563;
                         wrap: word-wrap;
                         horizontal-stretch: 1;
                     }
@@ -153,112 +184,105 @@ export component ModelsTab inherits Rectangle {
         }
 
         ScrollView {
-            content-width: root.width - 32px;
+            content-width: root.width - 46px;
             horizontal-stretch: 1;
             vertical-stretch: 1;
             GridLayout {
-                spacing: 10px;
+                spacing: 12px;
                 for model[index] in root.models: Rectangle {
                     row: index / root.card-columns;
                     col: Math.mod(index, root.card-columns);
                     width: root.card-width;
-                    background: root.theme == "dark" ? #222a38 : #f8fafc;
-                    border-color: root.theme == "dark" ? #384357 : #e2e8f0;
+                    background: root.palette-card;
+                    border-color: root.palette-border;
                     border-width: 1px;
-                    border-radius: 9px;
+                    border-radius: 12px;
                     VerticalBox {
                         min-width: 0px;
-                        padding: 10px;
-                        spacing: 4px;
-                        HorizontalBox {
+                        padding: 14px;
+                        spacing: 5px;
+                        HorizontalLayout {
                             spacing: 8px;
                             Text {
                                 text: model.id;
-                                font-size: 16px;
-                                font-weight: 650;
-                                color: root.theme == "dark" ? #f8fafc : #172338;
+                                font-size: 15px;
+                                font-weight: 700;
+                                color: root.palette-text;
                                 wrap: word-wrap;
                                 horizontal-stretch: 1;
                             }
-                            Text {
-                                text: model.installed ? "INSTALLED" : "HUGGING FACE";
-                                color: model.installed ? #34d399 : #a78bfa;
-                                font-size: 11px;
-                                font-weight: 700;
-                                wrap: word-wrap;
+                            Rectangle {
+                                width: 80px;
+                                height: 22px;
+                                border-radius: 11px;
+                                background: model.installed ? #064e3b : (root.theme == "dark" ? #3b2f63 : #ede9fe);
+                                Text {
+                                    text: model.installed ? "INSTALLED" : "HUB";
+                                    font-size: 10px;
+                                    font-weight: 700;
+                                    color: model.installed ? #34d399 : #8b5cf6;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
                             }
                         }
                         Text {
                             text: model.author + "  ·  " + model.category-label;
-                            color: root.theme == "dark" ? #cbd5e1 : #475569;
+                            color: root.palette-muted;
+                            font-size: 12px;
                             wrap: word-wrap;
-                            horizontal-stretch: 1;
                         }
                         Text {
-                            text: "Languages: " + model.languages + "    Framework: " + model.framework;
-                            color: root.theme == "dark" ? #cbd5e1 : #475569;
+                            text: model.languages;
+                            color: root.palette-text;
+                            font-size: 12px;
                             wrap: word-wrap;
-                            horizontal-stretch: 1;
                         }
-                        // Text {
-                        //     text: "Tags: " + model.tags;
-                        //     color: root.theme == "dark" ? #aab4c5 : #64748b;
-                        //     wrap: word-wrap;
-                        //     horizontal-stretch: 1;
-                        // }
-                        Text {
-                            text: "Architecture: " + model.architecture;
-                            color: root.theme == "dark" ? #cbd5e1 : #475569;
-                            wrap: word-wrap;
-                            horizontal-stretch: 1;
-                        }
-                        Text {
-                            text: model.stats;
-                            color: root.theme == "dark" ? #cbd5e1 : #475569;
-                            wrap: word-wrap;
-                            horizontal-stretch: 1;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: model.framework + " · " + model.architecture;
+                                color: root.palette-muted;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                                horizontal-stretch: 1;
+                            }
+                            Text {
+                                text: model.size-label;
+                                color: root.palette-muted;
+                                font-size: 12px;
+                            }
                         }
                         Text {
-                            text: "File size: " + model.size-label;
-                            color: root.theme == "dark" ? #cbd5e1 : #475569;
+                            text: model.stats + "  ·  " + model.license;
+                            color: root.palette-muted;
+                            font-size: 11px;
                             wrap: word-wrap;
-                            horizontal-stretch: 1;
                         }
                         Text {
-                            text: "License: " + model.license;
-                            color: root.theme == "dark" ? #cbd5e1 : #475569;
+                            text: model.compatibility;
+                            color: model.compatibility == "Compatible" ? root.palette-ok : root.palette-warn;
+                            font-size: 12px;
+                            font-weight: 600;
                             wrap: word-wrap;
-                            horizontal-stretch: 1;
-                        }
-                        Text {
-                            text: "Hardware compatibility: " + model.compatibility;
-                            color: model.compatibility == "Compatible" ? #34d399 : #fbbf24;
-                            wrap: word-wrap;
-                            horizontal-stretch: 1;
                         }
                         if model.installed: Text {
-                            text: "Local: " + model.local-path;
-                            color: root.theme == "dark" ? #aab4c5 : #64748b;
+                            text: model.local-path;
+                            color: root.palette-muted;
+                            font-size: 10px;
                             wrap: word-wrap;
-                            horizontal-stretch: 1;
                         }
-                        VerticalBox {
-                            min-width: 0px;
+                        Rectangle { height: 1px; background: root.palette-border; }
+                        HorizontalLayout {
                             spacing: 6px;
                             if model.installed: Button {
-                                text: "Open Folder";
-                                height: 28px;
-                                horizontal-stretch: 1;
-                                min-width: 0px;
-                                max-width: root.card-width - 20px;
+                                text: "Open";
+                                height: 30px;
                                 clicked => { root.open-model-folder(model.local-path); }
                             }
                             if model.installed && model.deletable: Button {
-                                text: root.pending-delete-id == model.id ? "Confirm delete" : "Delete";
-                                height: 28px;
-                                horizontal-stretch: 1;
-                                min-width: 0px;
-                                max-width: root.card-width - 20px;
+                                text: root.pending-delete-id == model.id ? "Confirm" : "Delete";
+                                height: 30px;
                                 clicked => {
                                     if (root.pending-delete-id == model.id) {
                                         root.delete-model(model.id);
@@ -270,27 +294,19 @@ export component ModelsTab inherits Rectangle {
                             }
                             if model.installed && model.deletable && root.pending-delete-id == model.id: Button {
                                 text: "Keep";
-                                height: 28px;
-                                horizontal-stretch: 1;
-                                min-width: 0px;
-                                max-width: root.card-width - 20px;
+                                height: 30px;
                                 clicked => { root.pending-delete-id = ""; }
                             }
                             if !model.installed: Button {
                                 text: "Download";
-                                height: 28px;
-                                horizontal-stretch: 1;
-                                min-width: 0px;
-                                max-width: root.card-width - 20px;
+                                height: 30px;
                                 enabled: root.active-download-id == "";
                                 clicked => { root.download-hub-model(model.id, model.task); }
                             }
+                            Rectangle { horizontal-stretch: 1; }
                             Button {
-                                text: "View on Hugging Face";
-                                height: 28px;
-                                horizontal-stretch: 1;
-                                min-width: 0px;
-                                max-width: root.card-width - 20px;
+                                text: "HF Page";
+                                height: 30px;
                                 clicked => { root.open-hub-repository(model.id); }
                             }
                         }
@@ -300,7 +316,8 @@ export component ModelsTab inherits Rectangle {
         }
         Text {
             text: "Compatibility is marked unknown unless available system memory indicates a resource limitation. Downloads require curl; gated repositories need HF_TOKEN.";
-            color: root.theme == "dark" ? #8490a4 : #64748b;
+            color: root.palette-muted;
+            font-size: 11px;
             wrap: word-wrap;
         }
     }

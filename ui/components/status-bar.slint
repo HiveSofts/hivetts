@@ -1,16 +1,38 @@
+// Slim status strip with a state indicator pinned to the bottom of the content column.
 export component StatusBar inherits Rectangle {
     in property <string> theme: "system";
     in property <string> status-text: "";
+    in property <bool> busy: false;
 
-    background: root.theme == "dark" ? #263449 : #e9eff8;
-    border-radius: 8px;
-    height: 36px;
+    property <color> palette-surface: root.theme == "dark" ? #1b2333 : #eaf0fa;
+    property <color> palette-border: root.theme == "dark" ? #2c3a52 : #d7e0ef;
+    property <color> palette-text: root.theme == "dark" ? #dbe4f0 : #334155;
 
-    Text {
-        x: 12px;
-        y: 8px;
-        text: "●  " + root.status-text;
-        color: root.theme == "dark" ? #e2e8f0 : #334155;
-        wrap: word-wrap;
+    height: 38px;
+    background: root.palette-surface;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: root.palette-border;
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 9px;
+        alignment: start;
+
+        Rectangle {
+            width: 9px;
+            height: 9px;
+            border-radius: 5px;
+            background: root.busy ? #f59e0b : #34d399;
+        }
+        Text {
+            text: root.status-text;
+            color: root.palette-text;
+            vertical-alignment: center;
+            wrap: word-wrap;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
     }
 }

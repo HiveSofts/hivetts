@@ -1,16 +1,15 @@
-import { VerticalBox } from "std-widgets.slint";
-import { AppHeader } from "components/app-header.slint";
 import { StatusBar } from "components/status-bar.slint";
-import { TabNavigation } from "components/tab-navigation.slint";
+import { SideNavigation } from "components/side-navigation.slint";
 import { HubModel, LanguageOption, ModelsTab } from "tabs/models.slint";
-import { SettingsTab } from "tabs/settings.slint";
 import { SpeechToTextTab } from "tabs/speech-to-text.slint";
 import { TextToSpeechTab } from "tabs/text-to-speech.slint";
 
 export component AppWindow inherits Window {
     title: "HiveTTS";
-    width: 1000px;
-    height: 1000px;
+    preferred-width: 1100px;
+    preferred-height: 820px;
+    min-width: 780px;
+    min-height: 600px;
 
     in-out property <string> speech-text: "";
     in-out property <string> transcript-text: "";
@@ -75,26 +74,25 @@ export component AppWindow inherits Window {
         root.save-settings();
     }
 
-    background: root.theme == "dark" ? #111827 : #f5f7fb;
+    background: root.theme == "dark" ? #0b1120 : #eef2f8;
 
-    Rectangle {
-        background: root.theme == "dark" ? #111827 : #f5f7fb;
+    HorizontalLayout {
+        spacing: 16px;
+        padding: 16px;
 
-        VerticalBox {
-            padding: 22px;
-            spacing: 14px;
-
-            AppHeader {
-                theme: root.theme;
-                toggle-theme => {
-                    root.theme = root.theme == "dark" ? "light" : "dark";
-                }
+        SideNavigation {
+            theme: root.theme;
+            current-tab <=> root.current-tab;
+            nav-ids: ["tts", "stt", "models"];
+            nav-labels: ["Text to Speech", "Speech to Text", "Models"];
+            toggle-theme => {
+                root.theme = root.theme == "dark" ? "light" : "dark";
             }
+        }
 
-            TabNavigation {
-                current-tab <=> root.current-tab;
-                theme: root.theme;
-            }
+        VerticalLayout {
+            spacing: 12px;
+            horizontal-stretch: 1;
 
             if root.current-tab == "tts": TextToSpeechTab {
                 theme: root.theme;
@@ -115,9 +113,14 @@ export component AppWindow inherits Window {
 
             if root.current-tab == "stt": SpeechToTextTab {
                 theme: root.theme;
+                transcript-text: root.transcript-text;
                 is-recording: root.is-recording;
-                transcript-text <=> root.transcript-text;
                 audio-file-path <=> root.audio-file-path;
+                model-path <=> root.model-path;
+                piper-executable <=> root.piper-executable;
+                piper-voice <=> root.piper-voice;
+                language <=> root.language;
+                speech-rate <=> root.speech-rate;
                 start-recording => {
                     root.start-recording();
                 }
@@ -164,18 +167,12 @@ export component AppWindow inherits Window {
                 }
             }
 
-            if root.current-tab == "settings": SettingsTab {
-                theme: root.theme;
-                model-path <=> root.model-path;
-                piper-executable <=> root.piper-executable;
-                piper-voice <=> root.piper-voice;
-                language <=> root.language;
-                speech-rate <=> root.speech-rate;
-            }
+            Rectangle { }
 
             StatusBar {
                 theme: root.theme;
                 status-text: root.status-text;
+                busy: root.is-recording || root.active-model-download-id != "";
             }
         }
     }
