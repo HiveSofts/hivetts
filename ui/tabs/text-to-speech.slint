@@ -1,21 +1,77 @@
-import { Button, LineEdit, TextEdit, VerticalBox } from "std-widgets.slint";
+import { Button, ComboBox, LineEdit, Slider, TextEdit, VerticalBox } from "std-widgets.slint";
 import { PageHeader } from "../components/page-header.slint";
 
-// Workspace card for speaking text and exporting WAV files.
+// Workspace card for advanced speaking, prosody control, and audio export.
 export component TextToSpeechTab inherits Rectangle {
+    pure function voice-to-index(voice: string) -> int {
+        return voice == "female" ? 0 : voice == "male" ? 1 : voice == "child" ? 2 :
+            voice == "whisper" ? 3 : voice == "grotesque" ? 4 : -1;
+    }
+    pure function language-to-index(code: string) -> int {
+        return code == "fa" ? 0 : code == "en" ? 1 : code == "ar" ? 2 : code == "tr" ? 3 : -1;
+    }
+    pure function emotion-to-index(emotion: string) -> int {
+        return emotion == "neutral" ? 0 : emotion == "happy" ? 1 : emotion == "sad" ? 2 :
+            emotion == "formal" ? 3 : emotion == "friendly" ? 4 : emotion == "excited" ? 5 :
+            emotion == "calm" ? 6 : -1;
+    }
+
     in property <string> theme: "system";
     in-out property <string> speech-text: "";
     in property <string> text-stats: "";
     in-out property <string> export-path: "";
     in-out property <string> text-file-path: "";
+    in-out property <string> voice: "female";
+    in-out property <string> tts-language: "fa";
+    in-out property <string> emotion: "neutral";
+    in-out property <float> pitch: 0;
+    in-out property <float> volume: 1.0;
+    in-out property <float> speech-rate: 1.0;
+    in-out property <float> pause-multiplier: 1.0;
+    in-out property <string> auto-save-directory: "";
+    in property <string> last-generated-file: "";
 
     callback speak(string);
     callback export-wav(string);
+    callback export-mp3(string);
     callback load-text(string);
+    callback open-export-folder(string);
+
+    property <[string]> voice-options: [
+        "Female",
+        "Male",
+        "Child",
+        "Whisper",
+        "Grotesque",
+    ];
+    property <[string]> voice-values: [
+        "female",
+        "male",
+        "child",
+        "whisper",
+        "grotesque",
+    ];
+    property <[string]> language-options: [
+        "Persian (fa)",
+        "English (en)",
+        "Arabic (ar)",
+        "Turkish (tr)",
+    ];
+    property <[string]> language-values: ["fa", "en", "ar", "tr"];
+    property <[string]> emotion-options: [
+        "Neutral",
+        "Happy",
+        "Sad",
+        "Formal",
+        "Friendly",
+        "Excited",
+        "Calm",
+    ];
 
     property <color> palette-surface: root.theme == "dark" ? #161e2c : #ffffff;
     property <color> palette-border: root.theme == "dark" ? #2c3a52 : #e2e8f0;
     property <color> palette-muted: root.theme == "dark" ? #8c98ab : #64748b;
+    property <color> palette-text: root.theme == "dark" ? #f1f5f9 : #0f1b2d;
     property <color> palette-field: root.theme == "dark" ? #101722 : #f8fafc;
 
     background: root.palette-surface;
@@ -30,14 +86,14 @@ export component TextToSpeechTab inherits Rectangle {
         PageHeader {
             theme: root.theme;
             title: "Text to Speech";
-            subtitle: "Enter text or load a UTF-8 .txt file. Text stays on this device.";
+            subtitle: "Natural voices, multilingual reading, and prosody control. Text stays on this device.";
             badge-text: "TTS";
             badge-color: #4f46e5;
         }
 
         TextEdit {
             text <=> root.speech-text;
-            min-height: 240px;
+            min-height: 180px;
             font-size: 16px;
             wrap: word-wrap;
         }
@@ -48,6 +104,140 @@ export component TextToSpeechTab inherits Rectangle {
             color: root.palette-muted;
         }
 
+        // Voice, language, and tone selection
+        Text {
+            text: "VOICE & TONE";
+            font-size: 10px;
+            font-weight: 700;
+            color: root.palette-muted;
+        }
+        HorizontalLayout {
+            spacing: 14px;
+            VerticalLayout {
+                spacing: 4px;
+                Text {
+                    text: "Speaker voice";
+                    font-size: 11px;
+                    color: root.palette-muted;
+                }
+                ComboBox {
+                    model: root.voice-options;
+                    current-index: root.voice-to-index(root.voice);
+                    changed current-index => {
+                        root.voice = root.voice-values[self.current-index];
+                    }
+                }
+            }
+            VerticalLayout {
+                spacing: 4px;
+                Text {
+                    text: "Language";
+                    font-size: 11px;
+                    color: root.palette-muted;
+                }
+                ComboBox {
+                    model: root.language-options;
+                    current-index: root.language-to-index(root.tts-language);
+                    changed current-index => {
+                        root.tts-language = root.language-values[self.current-index];
+                    }
+                }
+            }
+            VerticalLayout {
+                spacing: 4px;
+                Text {
+                    text: "Emotion";
+                    font-size: 11px;
+                    color: root.palette-muted;
+                }
+                ComboBox {
+                    model: root.emotion-options;
+                    current-index: root.emotion-to-index(root.emotion);
+                    changed current-index => {
+                        root.emotion = root.emotion-options[self.current-index].to-lowercase();
+                    }
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        // Prosody sliders: pitch, volume, speed, pauses
+        HorizontalLayout {
+            spacing: 14px;
+            VerticalLayout {
+                spacing: 2px;
+                horizontal-stretch: 1;
+                Text {
+                    text: "Pitch: " + (root.pitch >= 0 ? "+" : "") + Math.round(root.pitch) + " (low ↔ high)";
+                    font-size: 11px;
+                    color: root.palette-muted;
+                }
+                Slider {
+                    value <=> root.pitch;
+                    minimum: -50;
+                    maximum: 50;
+                    step: 1;
+                }
+            }
+            VerticalLayout {
+                spacing: 2px;
+                horizontal-stretch: 1;
+                Text {
+                    text: "Volume: " + Math.round(root.volume * 100) + "%";
+                    font-size: 11px;
+                    color: root.palette-muted;
+                }
+                Slider {
+                    value <=> root.volume;
+                    minimum: 0.2;
+                    maximum: 2.0;
+                    step: 0.05;
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 14px;
+            VerticalLayout {
+                spacing: 2px;
+                horizontal-stretch: 1;
+                Text {
+                    text: "Speech speed: " + root.speech-rate + "x";
+                    font-size: 11px;
+                    color: root.palette-muted;
+                }
+                Slider {
+                    value <=> root.speech-rate;
+                    minimum: 0.5;
+                    maximum: 2.0;
+                    step: 0.05;
+                }
+            }
+            VerticalLayout {
+                spacing: 2px;
+                horizontal-stretch: 1;
+                Text {
+                    text: "Pause length: " + root.pause-multiplier + "x";
+                    font-size: 11px;
+                    color: root.palette-muted;
+                }
+                Slider {
+                    value <=> root.pause-multiplier;
+                    minimum: 0.5;
+                    maximum: 4.0;
+                    step: 0.5;
+                }
+            }
+        }
+
+        Rectangle { height: 1px; background: root.palette-border; }
+
+        // Generated audio files
+        Text {
+            text: "AUDIO FILES";
+            font-size: 10px;
+            font-weight: 700;
+            color: root.palette-muted;
+        }
         Rectangle {
             height: 46px;
             border-radius: 10px;
@@ -58,14 +248,54 @@ export component TextToSpeechTab inherits Rectangle {
                 padding: 7px;
                 spacing: 8px;
                 LineEdit {
-                    text <=> root.export-path;
-                    placeholder-text: "WAV output file path";
+                    text <=> root.auto-save-directory;
+                    placeholder-text: "Auto-save directory for spoken audio";
                     horizontal-stretch: 1;
                 }
                 Button {
-                    text: "Export WAV";
+                    text: "Open folder";
                     clicked => {
-                        root.export-wav(root.export-path);
+                        root.open-export-folder(root.auto-save-directory);
+                    }
+                }
+            }
+        }
+        Text {
+            text: root.last-generated-file == "" ?
+                "Speaking automatically saves a downloadable WAV file in the folder above." :
+                "Last file: " + root.last-generated-file;
+            font-size: 11px;
+            color: root.palette-muted;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            Rectangle {
+                height: 46px;
+                border-radius: 10px;
+                background: root.palette-field;
+                border-width: 1px;
+                border-color: root.palette-border;
+                horizontal-stretch: 1;
+                HorizontalLayout {
+                    padding: 7px;
+                    spacing: 8px;
+                    LineEdit {
+                        text <=> root.export-path;
+                        placeholder-text: "Export file path (.wav or .mp3)";
+                        horizontal-stretch: 1;
+                    }
+                    Button {
+                        text: "Export WAV";
+                        clicked => {
+                            root.export-wav(root.export-path);
+                        }
+                    }
+                    Button {
+                        text: "Export MP3";
+                        clicked => {
+                            root.export-mp3(root.export-path);
+                        }
                     }
                 }
             }
@@ -82,7 +312,7 @@ export component TextToSpeechTab inherits Rectangle {
                 spacing: 8px;
                 LineEdit {
                     text <=> root.text-file-path;
-                    placeholder-text: "Path to a UTF-8 .txt file";
+                    placeholder-text: "Path to a UTF-8 .txt file (books, articles, documents)";
                     horizontal-stretch: 1;
                 }
                 Button {

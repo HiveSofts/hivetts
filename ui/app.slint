@@ -26,6 +26,14 @@ export component AppWindow inherits Window {
     in-out property <string> export-path: "";
     in-out property <string> text-file-path: "";
     in-out property <string> audio-file-path: "";
+    in-out property <string> voice: "female";
+    in-out property <string> tts-language: "fa";
+    in-out property <string> emotion: "neutral";
+    in-out property <float> pitch: 0;
+    in-out property <float> volume: 1.0;
+    in-out property <float> pause-multiplier: 1.0;
+    in-out property <string> auto-save-directory: "";
+    in-out property <string> last-generated-file: "";
     in-out property <[HubModel]> model-cards: [];
     in property <[LanguageOption]> language-options: [];
     in property <[string]> language-option-labels: [];
@@ -39,6 +47,8 @@ export component AppWindow inherits Window {
     callback stop-recording();
     callback load-text(string);
     callback export-wav(string);
+    callback export-mp3(string);
+    callback open-export-folder(string);
     callback transcribe-file(string);
     callback save-settings();
     callback download-model(string);
@@ -68,6 +78,27 @@ export component AppWindow inherits Window {
         root.save-settings();
     }
     changed speech-rate => {
+        root.save-settings();
+    }
+    changed voice => {
+        root.save-settings();
+    }
+    changed tts-language => {
+        root.save-settings();
+    }
+    changed emotion => {
+        root.save-settings();
+    }
+    changed pitch => {
+        root.save-settings();
+    }
+    changed volume => {
+        root.save-settings();
+    }
+    changed pause-multiplier => {
+        root.save-settings();
+    }
+    changed auto-save-directory => {
         root.save-settings();
     }
     changed theme => {
@@ -100,11 +131,26 @@ export component AppWindow inherits Window {
                 text-stats: root.text-stats;
                 export-path <=> root.export-path;
                 text-file-path <=> root.text-file-path;
+                voice <=> root.voice;
+                tts-language <=> root.tts-language;
+                emotion <=> root.emotion;
+                pitch <=> root.pitch;
+                volume <=> root.volume;
+                speech-rate <=> root.speech-rate;
+                pause-multiplier <=> root.pause-multiplier;
+                auto-save-directory <=> root.auto-save-directory;
+                last-generated-file: root.last-generated-file;
                 speak(text) => {
                     root.speak(text);
                 }
                 export-wav(path) => {
                     root.export-wav(path);
+                }
+                export-mp3(path) => {
+                    root.export-mp3(path);
+                }
+                open-export-folder(path) => {
+                    root.open-export-folder(path);
                 }
                 load-text(path) => {
                     root.load-text(path);

@@ -13,7 +13,14 @@ pub struct AppConfig {
     pub piper_voice: String,
     pub speech_rate: f32,
     pub language: String,
+    pub tts_language: String,
     pub theme: String,
+    pub voice: String,
+    pub pitch: f32,
+    pub volume: f32,
+    pub emotion: String,
+    pub pause_multiplier: f32,
+    pub auto_save_directory: String,
 }
 
 impl Default for AppConfig {
@@ -24,9 +31,30 @@ impl Default for AppConfig {
             piper_voice: String::new(),
             speech_rate: 1.0,
             language: "auto".into(),
+            tts_language: "fa".into(),
             theme: "system".into(),
+            voice: "female".into(),
+            pitch: 0.0,
+            volume: 1.0,
+            emotion: "neutral".into(),
+            pause_multiplier: 1.0,
+            auto_save_directory: default_output_directory(),
         }
     }
+}
+
+fn default_output_directory() -> String {
+    // Prefer the user's Downloads folder; fall back to the temporary directory.
+    if let Some(downloads) = env::var_os("XDG_DOWNLOAD_DIR") {
+        return PathBuf::from(downloads).display().to_string();
+    }
+    let base = if cfg!(target_os = "windows") {
+        env::var_os("USERPROFILE").map(PathBuf::from)
+    } else {
+        env::var_os("HOME").map(PathBuf::from)
+    };
+    base.map(|directory| directory.join("Downloads").display().to_string())
+        .unwrap_or_else(|| env::temp_dir().display().to_string())
 }
 
 impl AppConfig {
@@ -79,6 +107,9 @@ mod tests {
         let restored: AppConfig = serde_json::from_str(&json).expect("config deserializes");
         assert_eq!(restored.language, "auto");
         assert_eq!(restored.speech_rate, 1.0);
+        assert_eq!(restored.tts_language, "fa");
+        assert_eq!(restored.emotion, "neutral");
+        assert_eq!(restored.pause_multiplier, 1.0);
     }
 
     #[test]
@@ -87,5 +118,9 @@ mod tests {
             serde_json::from_str(r#"{"whisper_model":"model.bin"}"#).expect("settings parse");
         assert_eq!(restored.whisper_model, "model.bin");
         assert_eq!(restored.theme, "system");
+        assert_eq!(restored.voice, "female");
+        assert_eq!(restored.pitch, 0.0);
+        assert_eq!(restored.volume, 1.0);
+        assert!(!restored.auto_save_directory.is_empty());
     }
 }

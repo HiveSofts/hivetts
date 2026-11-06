@@ -98,6 +98,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.set_language(settings.language.clone().into());
     app.set_speech_rate(settings.speech_rate);
     app.set_theme(settings.theme.clone().into());
+    app.set_voice(settings.voice.clone().into());
+    app.set_tts_language(settings.tts_language.clone().into());
+    app.set_emotion(settings.emotion.clone().into());
+    app.set_pitch(settings.pitch);
+    app.set_volume(settings.volume);
+    app.set_pause_multiplier(settings.pause_multiplier);
+    app.set_auto_save_directory(settings.auto_save_directory.clone().into());
 
     let recording = audio::new_recording_state();
 
@@ -118,15 +125,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let weak = app.as_weak();
     app.on_speak(move |text| {
         let weak = weak.clone();
+        let text = text.to_string();
         thread::spawn(move || {
             let settings = load_runtime_config(&weak);
             let result = LocalSynthesizer.speak(&text, &settings);
-            set_status(
-                weak,
-                result
-                    .map(|()| "Speech finished.".to_string())
-                    .unwrap_or_else(|error| error.to_string()),
-            );
+            let message = match result {
+                Ok(Some(path)) => {
+                    let message = format!("Speech finished. File saved to {}.", path.display());
+                    set_last_generated_file(weak.clone(), path.display().to_string());
+                    message
+                }
+                Ok(None) => "Speech finished.".to_string(),
+                Err(error) => error.to_string(),
+            };
+            set_status(weak, message);
         });
     });
 
@@ -374,6 +386,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let weak = app.as_weak();
+    app.on_export_mp3(move |destination| {
+        let weak = weak.clone();
+        let destination = PathBuf::from(destination.to_string());
+        let Some(app) = weak.upgrade() else {
+            return;
+        };
+        let text = app.get_speech_text().to_string();
+        drop(app);
+        thread::spawn(move || {
+            let settings = load_runtime_config(&weak);
+            let result = LocalSynthesizer.export_mp3(&text, &destination, &settings);
+            set_status(
+                weak,
+                result
+                    .map(|()| format!("MP3 exported to {}.", destination.display()))
+                    .unwrap_or_else(|error| error.to_string()),
+            );
+        });
+    });
+
+    let weak = app.as_weak();
+    app.on_open_export_folder(move |path| {
+        let path = PathBuf::from(path.to_string());
+        if let Err(error) = tts::tts::open_path(&path) {
+            set_status(
+                weak.clone(),
+                format!("Could not open the export folder: {error}"),
+            );
+        }
+    });
+
+    let weak = app.as_weak();
     app.on_transcribe_file(move |audio_path| {
         let weak = weak.clone();
         let audio_path = PathBuf::from(audio_path.to_string());
@@ -545,7 +589,14 @@ fn runtime_config(app: &AppWindow) -> AppConfig {
         piper_voice: app.get_piper_voice().to_string(),
         speech_rate: app.get_speech_rate(),
         language: app.get_language().to_string(),
+        tts_language: app.get_tts_language().to_string(),
         theme: app.get_theme().to_string(),
+        voice: app.get_voice().to_string(),
+        pitch: app.get_pitch(),
+        volume: app.get_volume(),
+        emotion: app.get_emotion().to_string(),
+        pause_multiplier: app.get_pause_multiplier(),
+        auto_save_directory: app.get_auto_save_directory().to_string(),
     }
 }
 
@@ -559,6 +610,16 @@ fn set_status(weak: slint::Weak<AppWindow>, message: String) {
     if let Err(error) = slint::invoke_from_event_loop(move || {
         if let Some(app) = weak.upgrade() {
             app.set_status_text(message.into());
+        }
+    }) {
+        eprintln!("Could not update the UI: {error}");
+    }
+}
+
+fn set_last_generated_file(weak: slint::Weak<AppWindow>, path: String) {
+    if let Err(error) = slint::invoke_from_event_loop(move || {
+        if let Some(app) = weak.upgrade() {
+            app.set_last_generated_file(path.into());
         }
     }) {
         eprintln!("Could not update the UI: {error}");
