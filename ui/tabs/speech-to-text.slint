@@ -1,4 +1,4 @@
-import { Button, LineEdit, ScrollView, Slider, VerticalBox } from "std-widgets.slint";
+import { Button, ComboBox, LineEdit, ScrollView, Slider, VerticalBox } from "std-widgets.slint";
 import { PageHeader } from "../components/page-header.slint";
 
 // Workspace card for microphone recording, file transcription, and voice settings.
@@ -8,6 +8,10 @@ export component SpeechToTextTab inherits Rectangle {
     in property <bool> is-recording: false;
     in-out property <string> audio-file-path: "";
     in-out property <string> model-path: "";
+    // Categorized downloaded STT models; selecting a row updates model-path.
+    in property <[string]> model-labels: [];
+    in property <[string]> model-paths: [];
+    in-out property <int> model-selected-index: 0;
     in-out property <string> piper-executable: "";
     in-out property <string> piper-voice: "";
     in-out property <string> language: "auto";
@@ -16,6 +20,12 @@ export component SpeechToTextTab inherits Rectangle {
     callback start-recording();
     callback stop-recording();
     callback transcribe-file(string);
+
+    changed model-selected-index => {
+        if root.model-selected-index >= 0 && root.model-selected-index < root.model-paths.length {
+            root.model-path = root.model-paths[root.model-selected-index];
+        }
+    }
 
     property <color> palette-surface: root.theme == "dark" ? #161e2c : #ffffff;
     property <color> palette-border: root.theme == "dark" ? #2c3a52 : #e2e8f0;
@@ -144,6 +154,27 @@ export component SpeechToTextTab inherits Rectangle {
                 text <=> root.language;
                 placeholder-text: "auto or ISO code, e.g. en";
                 horizontal-stretch: 1;
+            }
+        }
+        // Categorized downloaded models, grouped by language.
+        VerticalLayout {
+            spacing: 4px;
+            Text {
+                text: "Whisper model (downloaded models, grouped by language)";
+                font-size: 11px;
+                color: root.palette-muted;
+            }
+            ComboBox {
+                model: root.model-labels;
+                current-index <=> root.model-selected-index;
+            }
+            Text {
+                text: root.model-labels.length == 0
+                    ? "No downloaded STT models yet. Download an automatic-speech-recognition model in the Models tab, or set a path below."
+                    : "";
+                font-size: 11px;
+                color: root.palette-muted;
+                wrap: word-wrap;
             }
         }
         Rectangle {

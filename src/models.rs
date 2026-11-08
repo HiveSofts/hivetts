@@ -139,6 +139,115 @@ struct ApiLfs {
     size: u64,
 }
 
+/// Installed models that share at least one language.
+#[derive(Clone, Debug)]
+pub struct LanguageGroup {
+    pub language: String,
+    pub models: Vec<HubModel>,
+}
+
+/// Parse the comma-separated `languages` metadata into lowercase codes.
+/// Placeholder values such as "Not specified" or "Multilingual" yield no codes.
+pub fn parse_languages(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|entry| {
+            let entry = entry.trim().to_lowercase();
+            entry
+                .trim_start_matches("language:")
+                .trim()
+                .to_string()
+        })
+        .filter(|entry| {
+            !entry.is_empty()
+                && !matches!(
+                    entry.as_str(),
+                    "not specified" | "unknown" | "multilingual"
+                )
+        })
+        .collect()
+}
+
+/// Group downloaded models by language; multi-language models appear in every
+/// matching group and models without usable metadata land in the "other" group.
+pub fn group_by_language(models: &[HubModel]) -> Vec<LanguageGroup> {
+    let mut groups: std::collections::BTreeMap<String, Vec<HubModel>> = Default::default();
+    for model in models {
+        let codes = parse_languages(&model.languages);
+        if codes.is_empty() {
+            groups.entry("other".into()).or_default().push(model.clone());
+        } else {
+            for code in codes {
+                groups.entry(code).or_default().push(model.clone());
+            }
+        }
+    }
+    groups
+        .into_iter()
+        .map(|(language, mut members)| {
+            members.sort_by(|left, right| left.id.cmp(&right.id));
+            LanguageGroup {
+                language,
+                models: members,
+            }
+        })
+        .collect()
+}
+
+/// Locate the runnable Whisper weights (.bin/.ggml) inside an installed STT model.
+/// Legacy single-file downloads resolve to themselves; repository folders are
+/// searched for the first weights file.
+pub fn stt_model_file(model: &HubModel) -> Option<String> {
+    if model.task != "automatic-speech-recognition" {
+        return None;
+    }
+    let path = Path::new(&model.local_path);
+    if path.is_file() {
+        return Some(model.local_path.clone());
+    }
+    let mut candidates = collect_files(path).ok()?.into_iter().filter(|file| {
+        let lower = file.to_lowercase();
+        lower.ends_with(".bin") || lower.ends_with(".ggml")
+    }).collect::<Vec<_>>();
+    candidates.sort();
+    candidates
+        .first()
+        .map(|file| path.join(file).to_string_lossy().into_owned())
+}
+
+/// Weight file extensions that identify an installed model as runnable, in
+/// preference order. Piper executes `.onnx` voices directly; other formats
+/// (for example `.safetensors`) still categorize and list the model, even
+/// though running them requires an engine beyond the bundled Piper path.
+const TTS_WEIGHT_EXTENSIONS: [&str; 4] = [".onnx", ".safetensors", ".pt", ".pth"];
+
+/// Locate the runnable voice weights inside an installed TTS model.
+/// Piper `.onnx` voices are preferred, then other common weight formats.
+pub fn tts_voice_file(model: &HubModel) -> Option<String> {
+    if model.task != "text-to-speech" {
+        return None;
+    }
+    let directory = Path::new(&model.local_path);
+    let files = collect_files(directory)
+        .ok()?
+        .into_iter()
+        .filter(|file| {
+            TTS_WEIGHT_EXTENSIONS
+                .iter()
+                .any(|extension| file.to_lowercase().ends_with(extension))
+        })
+        .collect::<Vec<_>>();
+    TTS_WEIGHT_EXTENSIONS
+        .iter()
+        .find_map(|extension| {
+            files
+                .iter()
+                .filter(|file| file.to_lowercase().ends_with(extension))
+                .min()
+        })
+        .map(|file| directory.join(file).to_string_lossy().into_owned())
+}
+
 pub fn models_directory() -> Result<PathBuf> {
     let base = if cfg!(target_os = "windows") {
         env::var_os("LOCALAPPDATA").map(PathBuf::from)
@@ -1280,5 +1389,69 @@ mod tests {
     #[test]
     fn byte_formatting_uses_binary_units() {
         assert_eq!(format_bytes(1024 * 1024), "1.0 MB");
+    }
+
+    #[test]
+    fn voice_files_prefer_piper_onnx_then_other_weights() {
+        let root = std::env::temp_dir().join(format!("hivetts-voice-weights-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("temporary voice directory");
+        fs::write(root.join("model.safetensors"), b"x").expect("safetensors placeholder");
+        let mut model = hub_model("a/piper", "text-to-speech", "en");
+        model.local_path = root.to_string_lossy().into_owned();
+        // Repositories without a Piper voice still resolve to their weights.
+        assert_eq!(tts_voice_file(&model).unwrap(), root.join("model.safetensors").to_string_lossy());
+        fs::write(root.join("voice.onnx"), b"x").expect("onnx placeholder");
+        // A Piper voice is preferred when the repository also provides one.
+        assert_eq!(tts_voice_file(&model).unwrap(), root.join("voice.onnx").to_string_lossy());
+        fs::remove_dir_all(&root).expect("clean temporary voice directory");
+    }
+
+    fn hub_model(id: &str, task: &str, languages: &str) -> HubModel {
+        HubModel {
+            id: id.into(),
+            author: "author".into(),
+            task: task.into(),
+            description: String::new(),
+            languages: languages.into(),
+            tags: Vec::new(),
+            framework: String::new(),
+            architecture: String::new(),
+            size_bytes: 0,
+            downloads: 0,
+            likes: 0,
+            license: String::new(),
+            compatibility: String::new(),
+            installed: true,
+            deletable: true,
+            local_path: String::new(),
+        }
+    }
+
+    #[test]
+    fn language_parsing_skips_placeholders() {
+        assert_eq!(
+            parse_languages("Language:FA, en , Not specified, Multilingual"),
+            ["fa", "en"]
+        );
+        assert!(parse_languages("unknown").is_empty());
+    }
+
+    #[test]
+    fn installed_models_group_by_every_declared_language() {
+        let models = vec![
+            hub_model("b/two", "text-to-speech", "en, fa"),
+            hub_model("a/piper-fa", "text-to-speech", "fa"),
+            hub_model("c/whisper", "automatic-speech-recognition", "Multilingual"),
+        ];
+        let groups = group_by_language(&models);
+        let keys = groups.iter().map(|group| group.language.as_str()).collect::<Vec<_>>();
+        assert_eq!(keys, ["en", "fa", "other"]);
+        let fa = groups.iter().find(|group| group.language == "fa").unwrap();
+        assert_eq!(
+            fa.models.iter().map(|model| model.id.as_str()).collect::<Vec<_>>(),
+            ["a/piper-fa", "b/two"]
+        );
+        assert_eq!(groups.last().unwrap().models[0].id, "c/whisper");
     }
 }

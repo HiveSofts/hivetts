@@ -1,14 +1,20 @@
 import { Button, ComboBox, LineEdit, Slider, TextEdit, VerticalBox } from "std-widgets.slint";
 import { PageHeader } from "../components/page-header.slint";
 
+// One row of the categorized voice-model list: a language header or a
+// selectable voice entry mapped back to its entry by entry-index.
+export struct VoiceRow {
+    is-header: bool,
+    text: string,
+    entry-index: int,
+    selected: bool,
+}
+
 // Workspace card for advanced speaking, prosody control, and audio export.
 export component TextToSpeechTab inherits Rectangle {
     pure function voice-to-index(voice: string) -> int {
         return voice == "female" ? 0 : voice == "male" ? 1 : voice == "child" ? 2 :
             voice == "whisper" ? 3 : voice == "grotesque" ? 4 : -1;
-    }
-    pure function language-to-index(code: string) -> int {
-        return code == "fa" ? 0 : code == "en" ? 1 : code == "ar" ? 2 : code == "tr" ? 3 : -1;
     }
     pure function emotion-to-index(emotion: string) -> int {
         return emotion == "neutral" ? 0 : emotion == "happy" ? 1 : emotion == "sad" ? 2 :
@@ -22,7 +28,6 @@ export component TextToSpeechTab inherits Rectangle {
     in-out property <string> export-path: "";
     in-out property <string> text-file-path: "";
     in-out property <string> voice: "female";
-    in-out property <string> tts-language: "fa";
     in-out property <string> emotion: "neutral";
     in-out property <float> pitch: 0;
     in-out property <float> volume: 1.0;
@@ -30,12 +35,31 @@ export component TextToSpeechTab inherits Rectangle {
     in-out property <float> pause-multiplier: 1.0;
     in-out property <string> auto-save-directory: "";
     in property <string> last-generated-file: "";
+    // Dynamic voice and language lists built from the installed models.
+    in property <[string]> voice-labels: ["Built-in engine (eSpeak NG)"];
+    in property <[string]> voice-model-ids: [""];
+    in-out property <int> voice-selected-index: 0;
+    // Downloaded voice models grouped by language; each option label carries
+    // its language prefix, and rows still drive the backend selection.
+    in property <[VoiceRow]> voice-rows: [];
+    in-out property <int> voice-row-selected-index: 0;
+    callback voice-picked(int);
+    in property <[string]> language-labels: [
+        "Persian (fa)",
+        "English (en)",
+        "Arabic (ar)",
+        "Turkish (tr)",
+    ];
+    in-out property <int> language-selected-index: 0;
+    in property <string> installed-summary: "";
 
     callback speak(string);
     callback export-wav(string);
     callback export-mp3(string);
     callback load-text(string);
     callback open-export-folder(string);
+
+    property <bool> builtin-engine: root.voice-model-ids[root.voice-selected-index] == "";
 
     property <[string]> voice-options: [
         "Female",
@@ -51,13 +75,6 @@ export component TextToSpeechTab inherits Rectangle {
         "whisper",
         "grotesque",
     ];
-    property <[string]> language-options: [
-        "Persian (fa)",
-        "English (en)",
-        "Arabic (ar)",
-        "Turkish (tr)",
-    ];
-    property <[string]> language-values: ["fa", "en", "ar", "tr"];
     property <[string]> emotion-options: [
         "Neutral",
         "Happy",
@@ -73,6 +90,8 @@ export component TextToSpeechTab inherits Rectangle {
     property <color> palette-muted: root.theme == "dark" ? #8c98ab : #64748b;
     property <color> palette-text: root.theme == "dark" ? #f1f5f9 : #0f1b2d;
     property <color> palette-field: root.theme == "dark" ? #101722 : #f8fafc;
+    property <color> palette-accent: root.theme == "dark" ? #1f2a51 : #eef2ff;
+    property <color> palette-hover: root.theme == "dark" ? #1c2536 : #f1f5f9;
 
     background: root.palette-surface;
     border-radius: 14px;
@@ -104,23 +123,48 @@ export component TextToSpeechTab inherits Rectangle {
             color: root.palette-muted;
         }
 
-        // Voice, language, and tone selection
+        // Voice model, speaker, language, and tone selection
         Text {
             text: "VOICE & TONE";
             font-size: 10px;
             font-weight: 700;
             color: root.palette-muted;
         }
+        VerticalLayout {
+            spacing: 4px;
+            Text {
+                text: "Voice model (downloaded models, grouped by language)";
+                font-size: 11px;
+                color: root.palette-muted;
+            }
+            // Dropdown selector: every downloaded model is one option, grouped
+            // by its language prefix, alongside the built-in engine.
+            ComboBox {
+                model: root.voice-labels;
+                current-index <=> root.voice-selected-index;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: root.voice-labels.length <= 1
+                    ? "Only the built-in engine is available. Download voice models in the Models tab to add languages here."
+                    : "Installed by language: " + root.installed-summary
+                        + "  ·  Piper (.onnx) voices can speak directly; other formats need a Piper-compatible export.";
+                font-size: 11px;
+                color: root.palette-muted;
+                wrap: word-wrap;
+            }
+        }
         HorizontalLayout {
             spacing: 14px;
             VerticalLayout {
                 spacing: 4px;
                 Text {
-                    text: "Speaker voice";
+                    text: "Speaker voice (built-in engine)";
                     font-size: 11px;
                     color: root.palette-muted;
                 }
                 ComboBox {
+                    enabled: root.builtin-engine;
                     model: root.voice-options;
                     current-index: root.voice-to-index(root.voice);
                     changed current-index => {
@@ -136,11 +180,8 @@ export component TextToSpeechTab inherits Rectangle {
                     color: root.palette-muted;
                 }
                 ComboBox {
-                    model: root.language-options;
-                    current-index: root.language-to-index(root.tts-language);
-                    changed current-index => {
-                        root.tts-language = root.language-values[self.current-index];
-                    }
+                    model: root.language-labels;
+                    current-index <=> root.language-selected-index;
                 }
             }
             VerticalLayout {

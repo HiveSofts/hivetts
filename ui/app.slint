@@ -2,7 +2,7 @@ import { StatusBar } from "components/status-bar.slint";
 import { SideNavigation } from "components/side-navigation.slint";
 import { HubModel, LanguageOption, ModelsTab } from "tabs/models.slint";
 import { SpeechToTextTab } from "tabs/speech-to-text.slint";
-import { TextToSpeechTab } from "tabs/text-to-speech.slint";
+import { TextToSpeechTab, VoiceRow } from "tabs/text-to-speech.slint";
 
 export component AppWindow inherits Window {
     title: "HiveTTS";
@@ -34,7 +34,28 @@ export component AppWindow inherits Window {
     in-out property <float> pause-multiplier: 1.0;
     in-out property <string> auto-save-directory: "";
     in-out property <string> last-generated-file: "";
+    in-out property <[string]> tts-voice-labels: ["Built-in engine (eSpeak NG)"];
+    in property <[string]> tts-voice-model-ids: [""];
+    in property <[string]> tts-voice-model-files: [""];
+    in property <[string]> tts-voice-languages: [""];
+    in-out property <int> tts-voice-index: 0;
+    // Categorized downloaded voice models shown as a grouped list on the TTS page.
+    in property <[VoiceRow]> tts-voice-rows: [];
+    in-out property <int> tts-voice-row-selected-index: 0;
+    in-out property <[string]> tts-language-labels: [
+        "Persian (fa)",
+        "English (en)",
+        "Arabic (ar)",
+        "Turkish (tr)",
+    ];
+    in property <[string]> tts-language-codes: ["fa", "en", "ar", "tr"];
+    in-out property <int> tts-language-index: 0;
+    in property <string> installed-language-summary: "";
     in-out property <[HubModel]> model-cards: [];
+    // Categorized downloaded STT models for the Speech-to-Text selector.
+    in property <[string]> stt-model-labels: [];
+    in property <[string]> stt-model-paths: [];
+    in-out property <int> stt-model-index: 0;
     in property <[LanguageOption]> language-options: [];
     in property <[string]> language-option-labels: [];
     in-out property <string> model-download-progress-text: "";
@@ -60,6 +81,11 @@ export component AppWindow inherits Window {
     callback open-model-folder(string);
     callback open-hub-repository(string);
     callback delete-model(string);
+    callback language-changed(int);
+    callback voice-changed(int);
+    callback voice-picked(int);
+    callback refresh-tts-voices();
+    callback refresh-stt-models();
 
     changed speech-text => {
         root.update-text-stats(root.speech-text);
@@ -104,6 +130,22 @@ export component AppWindow inherits Window {
     changed theme => {
         root.save-settings();
     }
+    changed tts-language-index => {
+        root.language-changed(root.tts-language-index);
+    }
+    changed tts-voice-index => {
+        root.voice-changed(root.tts-voice-index);
+    }
+    changed current-tab => {
+        // Keep the voice lists and language categorization fresh when the
+        // TTS or Models pages open, and the STT model list on its page.
+        if root.current-tab == "tts" || root.current-tab == "models" {
+            root.refresh-tts-voices();
+        }
+        if root.current-tab == "stt" {
+            root.refresh-stt-models();
+        }
+    }
 
     background: root.theme == "dark" ? #0b1120 : #eef2f8;
 
@@ -132,7 +174,6 @@ export component AppWindow inherits Window {
                 export-path <=> root.export-path;
                 text-file-path <=> root.text-file-path;
                 voice <=> root.voice;
-                tts-language <=> root.tts-language;
                 emotion <=> root.emotion;
                 pitch <=> root.pitch;
                 volume <=> root.volume;
@@ -140,6 +181,17 @@ export component AppWindow inherits Window {
                 pause-multiplier <=> root.pause-multiplier;
                 auto-save-directory <=> root.auto-save-directory;
                 last-generated-file: root.last-generated-file;
+                voice-labels: root.tts-voice-labels;
+                voice-model-ids: root.tts-voice-model-ids;
+                voice-selected-index <=> root.tts-voice-index;
+                voice-rows: root.tts-voice-rows;
+                voice-row-selected-index <=> root.tts-voice-row-selected-index;
+                voice-picked(row) => {
+                    root.voice-picked(row);
+                }
+                language-labels: root.tts-language-labels;
+                language-selected-index <=> root.tts-language-index;
+                installed-summary: root.installed-language-summary;
                 speak(text) => {
                     root.speak(text);
                 }
@@ -163,6 +215,9 @@ export component AppWindow inherits Window {
                 is-recording: root.is-recording;
                 audio-file-path <=> root.audio-file-path;
                 model-path <=> root.model-path;
+                model-labels: root.stt-model-labels;
+                model-paths: root.stt-model-paths;
+                model-selected-index <=> root.stt-model-index;
                 piper-executable <=> root.piper-executable;
                 piper-voice <=> root.piper-voice;
                 language <=> root.language;
@@ -180,6 +235,7 @@ export component AppWindow inherits Window {
 
             if root.current-tab == "models": ModelsTab {
                 theme: root.theme;
+                installed-summary: root.installed-language-summary;
                 models <=> root.model-cards;
                 language-options: root.language-options;
                 language-option-labels: root.language-option-labels;

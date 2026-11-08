@@ -80,10 +80,33 @@ fn piper_configured(config: &AppConfig) -> bool {
     !config.piper_executable.is_empty() && !config.piper_voice.is_empty()
 }
 
+/// A downloaded model voice requires Piper; selecting one without a configured
+/// executable must fail loudly instead of silently falling back to eSpeak NG.
+fn use_piper(config: &AppConfig) -> Result<bool> {
+    if config.piper_voice.trim().is_empty() {
+        return Ok(false);
+    }
+    if config.piper_executable.trim().is_empty() {
+        return Err(AppError::Message(
+            "Model voices need a Piper executable. Configure it under Speech to Text settings."
+                .into(),
+        ));
+    }
+    // Downloaded models are listed even when their weights are not Piper
+    // format; report that up front instead of failing inside piper.
+    if !config.piper_voice.to_lowercase().ends_with(".onnx") {
+        return Err(AppError::Message(format!(
+            "The selected voice model is not a Piper (.onnx) voice, so it cannot be spoken: {}",
+            config.piper_voice
+        )));
+    }
+    Ok(piper_configured(config))
+}
+
 impl SpeechSynthesizer for LocalSynthesizer {
     fn speak(&self, text: &str, config: &AppConfig) -> Result<Option<PathBuf>> {
         validate_text(text)?;
-        if piper_configured(config) {
+        if use_piper(config)? {
             let temp_path = unique_path(&temp_wav_directory(), "hivetts-speak", "wav");
             piper_synthesize(text, &temp_path, config)?;
             let result = play_wav(&temp_path);
@@ -165,7 +188,7 @@ fn synthesize_to_file(
     destination: &std::path::Path,
     config: &AppConfig,
 ) -> Result<()> {
-    if piper_configured(config) {
+    if use_piper(config)? {
         return piper_synthesize(text, destination, config);
     }
     #[cfg(target_os = "linux")]

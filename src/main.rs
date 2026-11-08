@@ -1,12 +1,16 @@
 slint::include_modules!();
 
 use serde::Deserialize;
+use slint::{Model, SharedString};
 use std::{
     env,
     io::{self, Write},
     path::PathBuf,
     process::Command,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicI32, AtomicU64, Ordering},
+        Arc,
+    },
     thread,
     time::Duration,
 };
@@ -18,6 +22,12 @@ use tts::{
 };
 
 static MODEL_SEARCH_GENERATION: AtomicU64 = AtomicU64::new(0);
+// Indexes already applied to the dynamic TTS voice and language selectors,
+// so list refreshes do not re-trigger the selection handlers.
+static TTS_LANGUAGE_APPLIED: AtomicI32 = AtomicI32::new(-1);
+static TTS_VOICE_APPLIED: AtomicI32 = AtomicI32::new(-1);
+static TTS_VOICE_ROW_APPLIED: AtomicI32 = AtomicI32::new(-1);
+static STT_MODEL_APPLIED: AtomicI32 = AtomicI32::new(-1);
 
 #[derive(Clone, Deserialize)]
 struct LanguageOptionData {
@@ -47,11 +57,318 @@ fn set_language_options(app: &AppWindow, mut options: Vec<LanguageOption>) {
     app.set_language_option_labels(slint::ModelRc::new(slint::VecModel::from(labels)));
 }
 
+/// Language name shown above the voice rows that belong to it in the
+/// categorized list on the TTS page.
+fn voice_group_name(language: &str, catalog: &[LanguageOptionData]) -> String {
+    if language == "other" {
+        return "Unspecified".into();
+    }
+    let code = language.to_uppercase();
+    match catalog.iter().find(|entry| entry.code == language) {
+        Some(entry) => format!("{} ({code})", entry.name),
+        None => code,
+    }
+}
+
+/// Downloaded Piper voices and the built-in engine as (language code, id,
+/// model file) triples in display order.
+type VoiceEntry = (String, String, String);
+
+/// Build the categorized voice-model rows and the parallel entry arrays used
+/// when a row is selected. Each downloaded Piper voice becomes a selectable
+/// row placed under its language header, alongside the built-in engine and an
+/// optional custom-path row.
+fn build_voice_rows(
+    installed: &[tts::models::HubModel],
+    piper_voice: &str,
+    catalog: &[LanguageOptionData],
+) -> (Vec<VoiceRow>, Vec<VoiceEntry>) {
+    let mut downloaded: Vec<VoiceEntry> = Vec::new();
+    for model in installed {
+        if let Some(file) = tts::models::tts_voice_file(model) {
+            let language = tts::models::parse_languages(&model.languages)
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| "other".into());
+            downloaded.push((language, model.id.clone(), file));
+        }
+    }
+    downloaded.sort();
+
+    // Entry 0 is always the built-in engine, which needs no model file.
+    let mut entries: Vec<VoiceEntry> = vec![("".into(), "".into(), "".into())];
+    // A manually configured Piper path that no downloaded model provides stays
+    // selectable instead of silently switching back to the built-in engine.
+    if !piper_voice.is_empty() && !downloaded.iter().any(|(_, _, file)| file == piper_voice) {
+        entries.push(("other".into(), "custom".into(), piper_voice.to_owned()));
+    }
+    entries.extend(downloaded.iter().cloned());
+
+    let header = |text: String| VoiceRow {
+        is_header: true,
+        text: text.into(),
+        entry_index: -1,
+        selected: false,
+    };
+    let option = |text: String, entry_index: usize| VoiceRow {
+        is_header: false,
+        text: text.into(),
+        entry_index: entry_index as i32,
+        selected: entries[entry_index].2 == piper_voice,
+    };
+    let mut rows: Vec<VoiceRow> = vec![
+        header("Engines".into()),
+        option("Built-in engine (eSpeak NG)".into(), 0),
+    ];
+    if entries.len() > 1 && entries[1].1 == "custom" {
+        rows.push(header("Custom".into()));
+        rows.push(option("Custom Piper voice".into(), 1));
+    }
+    let mut current_group = String::new();
+    for (index, (language, id, _)) in downloaded.iter().enumerate() {
+        // Downloaded voices follow the built-in (and optional custom) entries.
+        let entry_index = index + entries.len() - downloaded.len();
+        if language != &current_group {
+            current_group = language.clone();
+            rows.push(header(voice_group_name(language, catalog)));
+        }
+        rows.push(option(id.clone(), entry_index));
+    }
+    (rows, entries)
+}
+
+/// Move the voice selection to a categorized-list row and apply its model.
+fn select_voice_row(app: &AppWindow, weak: &slint::Weak<AppWindow>, row: i32) {
+    let Some(row_data) = app.get_tts_voice_rows().row_data(row.max(0) as usize) else {
+        return;
+    };
+    if row_data.is_header {
+        return;
+    }
+    let index = row_data.entry_index.max(0) as usize;
+    TTS_VOICE_ROW_APPLIED.store(row, Ordering::SeqCst);
+    app.set_tts_voice_row_selected_index(row);
+    // Store the applied entry so the changed tts-voice-index handler does not
+    // re-apply the same selection.
+    TTS_VOICE_APPLIED.store(index as i32, Ordering::SeqCst);
+    app.set_tts_voice_index(index as i32);
+    let Some(id) = app.get_tts_voice_model_ids().row_data(index) else {
+        return;
+    };
+    let id = id.to_string();
+    if id.is_empty() {
+        // The built-in eSpeak NG engine needs no model files.
+        app.set_piper_voice("".into());
+        set_status(weak.clone(), "Switched to the built-in engine.".into());
+        return;
+    }
+    if id == "custom" {
+        set_status(weak.clone(), "Using the custom Piper voice path.".into());
+        return;
+    }
+    let Some(file) = app.get_tts_voice_model_files().row_data(index) else {
+        return;
+    };
+    app.set_piper_voice(file.to_string().into());
+    if let Some(language) = app.get_tts_voice_languages().row_data(index) {
+        let language = language.to_string();
+        if !language.is_empty() && language != "other" {
+            set_selected_language(app, &language);
+        }
+    }
+    set_status(weak.clone(), format!("Voice model set to {id}."));
+}
+
+/// Rebuild the categorized voice-model list and the language selector on the
+/// TTS page from the downloaded models, grouped by their declared languages.
+fn apply_tts_voices(weak: &slint::Weak<AppWindow>, catalog: &[LanguageOptionData]) {
+    let Some(app) = weak.upgrade() else {
+        return;
+    };
+    let installed = tts::models::installed_models().unwrap_or_default();
+    let piper_voice = app.get_piper_voice().to_string();
+    let (rows, entries) = build_voice_rows(&installed, &piper_voice, catalog);
+    let selected_row = rows
+        .iter()
+        .position(|row| row.selected)
+        .unwrap_or(0) as i32;
+    let selected_entry = rows
+        .iter()
+        .find(|row| !row.is_header && row.selected)
+        .map(|row| row.entry_index)
+        .unwrap_or(0);
+    TTS_VOICE_ROW_APPLIED.store(selected_row, Ordering::SeqCst);
+
+    let labels: Vec<SharedString> = entries
+        .iter()
+        .map(|(language, id, _)| {
+            if id.is_empty() {
+                "Built-in engine (eSpeak NG)".into()
+            } else if id == "custom" {
+                "Custom Piper voice".into()
+            } else {
+                format!("{} · {}", language_display(language, catalog), id).into()
+            }
+        })
+        .collect();
+    let ids: Vec<SharedString> = entries
+        .iter()
+        .map(|(_, id, _)| id.clone().into())
+        .collect();
+    let files: Vec<SharedString> = entries
+        .iter()
+        .map(|(_, _, file)| file.clone().into())
+        .collect();
+    let voice_languages: Vec<SharedString> = entries
+        .iter()
+        .map(|(language, _, _)| language.clone().into())
+        .collect();
+
+    // The supported built-in languages stay on top; model languages extend the list.
+    let mut language_codes: Vec<String> =
+        ["fa", "en", "ar", "tr"].iter().map(|code| code.to_string()).collect();
+    for (language, _, _) in &entries {
+        if language != "other" && !language_codes.contains(language) {
+            language_codes.push(language.clone());
+        }
+    }
+    let current_language = app.get_tts_language().to_string();
+    if !current_language.is_empty() && !language_codes.contains(&current_language) {
+        language_codes.push(current_language.clone());
+    }
+    let language_labels = language_codes
+        .iter()
+        .map(|code| language_display(code, catalog).into())
+        .collect::<Vec<SharedString>>();
+    let language_index = language_codes
+        .iter()
+        .position(|code| *code == current_language)
+        .unwrap_or(0) as i32;
+
+    let summary = tts::models::group_by_language(&installed)
+        .iter()
+        .map(|group| {
+            format!(
+                "{} · {}",
+                language_display(&group.language, catalog),
+                group.models.len()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("  |  ");
+
+    app.set_tts_voice_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
+    app.set_tts_voice_row_selected_index(selected_row);
+    app.set_tts_voice_labels(slint::ModelRc::new(slint::VecModel::from(labels)));
+    app.set_tts_voice_model_ids(slint::ModelRc::new(slint::VecModel::from(ids)));
+    app.set_tts_voice_model_files(slint::ModelRc::new(slint::VecModel::from(files)));
+    app.set_tts_voice_languages(slint::ModelRc::new(slint::VecModel::from(voice_languages)));
+    app.set_tts_language_labels(slint::ModelRc::new(slint::VecModel::from(language_labels)));
+    app.set_tts_language_codes(slint::ModelRc::new(slint::VecModel::from(
+        language_codes
+            .iter()
+            .map(|code| SharedString::from(code.clone()))
+            .collect::<Vec<_>>(),
+    )));
+    app.set_installed_language_summary(summary.into());
+    // Store the applied indexes first so the setter calls below do not
+    // re-enter the selection handlers.
+    TTS_VOICE_APPLIED.store(selected_entry, Ordering::SeqCst);
+    app.set_tts_voice_index(selected_entry);
+    TTS_LANGUAGE_APPLIED.store(language_index, Ordering::SeqCst);
+    app.set_tts_language_index(language_index);
+    app.set_tts_language(current_language.into());
+}
+
+/// Rebuild the categorized STT model selector on the Speech-to-Text page from
+/// the downloaded automatic-speech-recognition models, grouped by language.
+fn apply_stt_models(weak: &slint::Weak<AppWindow>, catalog: &[LanguageOptionData]) {
+    let Some(app) = weak.upgrade() else {
+        return;
+    };
+    let installed = tts::models::installed_models().unwrap_or_default();
+    let mut entries: Vec<(String, String, String)> = Vec::new();
+    for model in &installed {
+        let Some(file) = tts::models::stt_model_file(model) else {
+            continue;
+        };
+        let language = tts::models::parse_languages(&model.languages)
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| "other".into());
+        entries.push((language, model.id.clone(), file));
+    }
+    entries.sort();
+
+    let current_path = app.get_model_path().to_string();
+    let mut labels: Vec<SharedString> = Vec::new();
+    let mut paths: Vec<SharedString> = Vec::new();
+    let mut model_index = 0i32;
+    for (language, id, file) in &entries {
+        labels.push(format!("{} · {}", language_display(language, catalog), id).into());
+        paths.push(file.clone().into());
+        if file == &current_path {
+            model_index = (labels.len() - 1) as i32;
+        }
+    }
+    // A manually configured path that no downloaded model provides stays as the
+    // default selection so the selector does not overwrite it.
+    if !current_path.is_empty() && !entries.iter().any(|(_, _, file)| file == &current_path) {
+        labels.push("Custom model path".into());
+        paths.push(current_path.clone().into());
+        model_index = (labels.len() - 1) as i32;
+    }
+
+    app.set_stt_model_labels(slint::ModelRc::new(slint::VecModel::from(labels)));
+    app.set_stt_model_paths(slint::ModelRc::new(slint::VecModel::from(paths)));
+    STT_MODEL_APPLIED.store(model_index, Ordering::SeqCst);
+    app.set_stt_model_index(model_index);
+}
+
+/// Select the language row matching `code` without re-running the handler.
+fn set_selected_language(app: &AppWindow, code: &str) {
+    let codes = app.get_tts_language_codes();
+    if let Some(row) = (0..codes.row_count())
+        .find(|row| codes.row_data(*row).is_some_and(|value| value.as_str() == code))
+    {
+        TTS_LANGUAGE_APPLIED.store(row as i32, Ordering::SeqCst);
+        app.set_tts_language_index(row as i32);
+    }
+    app.set_tts_language(code.into());
+}
+
+fn language_display(code: &str, catalog: &[LanguageOptionData]) -> String {
+    if code == "other" {
+        return "Unspecified".into();
+    }
+    if let Some(entry) = catalog.iter().find(|entry| entry.code == code) {
+        return format!("{} ({code})", entry.name);
+    }
+    let mut characters = code.chars();
+    match characters.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + characters.as_str(),
+        None => String::new(),
+    }
+}
+
+/// Queue a voice-list rebuild on the UI thread after the installed models change.
+fn schedule_tts_voice_refresh(weak: slint::Weak<AppWindow>, catalog: Arc<Vec<LanguageOptionData>>) {
+    if let Err(error) = slint::invoke_from_event_loop(move || {
+        if let Some(app) = weak.upgrade() {
+            apply_tts_voices(&app.as_weak(), &catalog);
+            apply_stt_models(&app.as_weak(), &catalog);
+        }
+    }) {
+        eprintln!("Could not refresh the model lists: {error}");
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = AppWindow::new()?;
     // Language names and ISO codes are from iso-codes (LGPL-2.1-or-later).
-    let language_catalog =
-        serde_json::from_str::<Vec<LanguageOptionData>>(include_str!("../ui/languages.json"))?;
+    let language_catalog = Arc::new(
+        serde_json::from_str::<Vec<LanguageOptionData>>(include_str!("../ui/languages.json"))?,
+    );
     let language_options = language_catalog
         .iter()
         .take(100)
@@ -62,9 +379,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect::<Vec<_>>();
     set_language_options(&app, language_options);
     let weak = app.as_weak();
+    let catalog = Arc::clone(&language_catalog);
     app.on_search_languages(move |query| {
         let query = query.trim().to_lowercase();
-        let options = language_catalog
+        let options = catalog
             .iter()
             .filter(|language| {
                 query.is_empty()
@@ -105,6 +423,68 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.set_volume(settings.volume);
     app.set_pause_multiplier(settings.pause_multiplier);
     app.set_auto_save_directory(settings.auto_save_directory.clone().into());
+
+    // Build the dynamic voice and language lists from downloaded models.
+    apply_tts_voices(&app.as_weak(), &language_catalog);
+    apply_stt_models(&app.as_weak(), &language_catalog);
+
+    let weak = app.as_weak();
+    let catalog = Arc::clone(&language_catalog);
+    app.on_refresh_tts_voices(move || apply_tts_voices(&weak, &catalog));
+
+    let weak = app.as_weak();
+    let catalog = Arc::clone(&language_catalog);
+    app.on_refresh_stt_models(move || apply_stt_models(&weak, &catalog));
+
+    let weak = app.as_weak();
+    app.on_language_changed(move |index| {
+        if TTS_LANGUAGE_APPLIED.load(Ordering::SeqCst) == index {
+            return;
+        }
+        let Some(app) = weak.upgrade() else {
+            return;
+        };
+        let Some(code) = app
+            .get_tts_language_codes()
+            .row_data(index.max(0) as usize)
+        else {
+            return;
+        };
+        TTS_LANGUAGE_APPLIED.store(index, Ordering::SeqCst);
+        app.set_tts_language(code.to_string().into());
+    });
+
+    let weak = app.as_weak();
+    app.on_voice_changed(move |index| {
+        if TTS_VOICE_APPLIED.load(Ordering::SeqCst) == index {
+            return;
+        }
+        let Some(app) = weak.upgrade() else {
+            return;
+        };
+        // Mirror the entry selection onto the matching categorized-list row.
+        let row = app
+            .get_tts_voice_rows()
+            .iter()
+            .position(|row| !row.is_header && row.entry_index == index)
+            .unwrap_or(0) as i32;
+        // The selection may already be applied by a categorized-list click.
+        if TTS_VOICE_ROW_APPLIED.load(Ordering::SeqCst) == row {
+            return;
+        }
+        select_voice_row(&app, &weak.clone(), row);
+    });
+
+    let weak = app.as_weak();
+    app.on_voice_picked(move |row| {
+        let Some(app) = weak.upgrade() else {
+            return;
+        };
+        if TTS_VOICE_ROW_APPLIED.load(Ordering::SeqCst) == row {
+            return;
+        }
+        select_voice_row(&app, &weak.clone(), row);
+    });
 
     let recording = audio::new_recording_state();
 
@@ -187,8 +567,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let weak = app.as_weak();
+    let catalog = Arc::clone(&language_catalog);
     app.on_download_hub_model(move |id, task| {
         let weak = weak.clone();
+        let refresh_weak = weak.clone();
+        let refresh_catalog = Arc::clone(&catalog);
         let id = id.to_string();
         let task = task.to_string();
         set_active_model_download(weak.clone(), id.clone());
@@ -267,6 +650,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         String::new(),
                         String::new(),
                     );
+                    schedule_tts_voice_refresh(refresh_weak, refresh_catalog);
                 }
                 Err(error) => {
                     set_active_model_download(weak.clone(), String::new());
@@ -325,8 +709,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let weak = app.as_weak();
+    let catalog = Arc::clone(&language_catalog);
     app.on_delete_model(move |model| {
         let weak = weak.clone();
+        let refresh_weak = weak.clone();
+        let refresh_catalog = Arc::clone(&catalog);
         let id = model.to_string();
         thread::spawn(move || match tts::models::delete_hub_model(&id) {
             Ok(()) => {
@@ -340,6 +727,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     String::new(),
                     String::new(),
                 );
+                schedule_tts_voice_refresh(refresh_weak, refresh_catalog);
             }
             Err(error) => set_status(weak, format!("Could not delete model: {error}")),
         });

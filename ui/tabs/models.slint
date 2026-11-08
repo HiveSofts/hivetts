@@ -39,6 +39,7 @@ export component ModelsTab inherits Rectangle {
     in property <bool> download-progress-indeterminate: false;
     in-out property <string> active-download-id: "";
     in-out property <string> pending-delete-id: "";
+    in property <string> installed-summary: "";
     callback refresh-models(string, string, string, string, string, string);
     callback search-languages(string);
     callback download-model(string);
@@ -148,6 +149,33 @@ export component ModelsTab inherits Rectangle {
                     font-weight: 600;
                     color: root.active-category == category
                         ? #ffffff : root.palette-muted;
+                }
+            }
+        }
+
+        // Downloaded models categorized by language
+        if root.installed-summary != "": Rectangle {
+            border-radius: 10px;
+            background: root.palette-field;
+            border-width: 1px;
+            border-color: root.palette-border;
+            VerticalBox {
+                padding-left: 14px;
+                padding-right: 14px;
+                padding-top: 10px;
+                padding-bottom: 10px;
+                spacing: 4px;
+                Text {
+                    text: "INSTALLED BY LANGUAGE";
+                    font-size: 10px;
+                    font-weight: 700;
+                    color: root.palette-muted;
+                }
+                Text {
+                    text: root.installed-summary;
+                    font-size: 12px;
+                    color: root.palette-text;
+                    wrap: word-wrap;
                 }
             }
         }
