@@ -28,10 +28,13 @@ export component AppWindow inherits Window {
     in-out property <string> audio-file-path: "";
     in-out property <string> voice: "female";
     in-out property <string> tts-language: "fa";
-    in-out property <string> emotion: "neutral";
+    // Voice Settings – speaker style and prosody controls.
+    in-out property <string> voice-style: "standard";
+    in-out property <string> speech-tone: "neutral";
     in-out property <float> pitch: 0;
     in-out property <float> volume: 1.0;
-    in-out property <float> pause-multiplier: 1.0;
+    in-out property <float> pause-sentence: 0.5;
+    in-out property <float> pause-paragraph: 1.2;
     in-out property <string> auto-save-directory: "";
     in-out property <string> last-generated-file: "";
     in-out property <[string]> tts-voice-labels: ["Built-in engine (eSpeak NG)"];
@@ -112,7 +115,10 @@ export component AppWindow inherits Window {
     changed tts-language => {
         root.save-settings();
     }
-    changed emotion => {
+    changed voice-style => {
+        root.save-settings();
+    }
+    changed speech-tone => {
         root.save-settings();
     }
     changed pitch => {
@@ -121,7 +127,10 @@ export component AppWindow inherits Window {
     changed volume => {
         root.save-settings();
     }
-    changed pause-multiplier => {
+    changed pause-sentence => {
+        root.save-settings();
+    }
+    changed pause-paragraph => {
         root.save-settings();
     }
     changed auto-save-directory => {
@@ -174,11 +183,13 @@ export component AppWindow inherits Window {
                 export-path <=> root.export-path;
                 text-file-path <=> root.text-file-path;
                 voice <=> root.voice;
-                emotion <=> root.emotion;
+                voice-style <=> root.voice-style;
+                speech-tone <=> root.speech-tone;
                 pitch <=> root.pitch;
                 volume <=> root.volume;
                 speech-rate <=> root.speech-rate;
-                pause-multiplier <=> root.pause-multiplier;
+                pause-sentence <=> root.pause-sentence;
+                pause-paragraph <=> root.pause-paragraph;
                 auto-save-directory <=> root.auto-save-directory;
                 last-generated-file: root.last-generated-file;
                 voice-labels: root.tts-voice-labels;

@@ -418,10 +418,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.set_theme(settings.theme.clone().into());
     app.set_voice(settings.voice.clone().into());
     app.set_tts_language(settings.tts_language.clone().into());
-    app.set_emotion(settings.emotion.clone().into());
+    app.set_voice_style(settings.voice_style.clone().into());
+    app.set_speech_tone(settings.speech_tone.clone().into());
     app.set_pitch(settings.pitch);
     app.set_volume(settings.volume);
-    app.set_pause_multiplier(settings.pause_multiplier);
+    app.set_pause_sentence(settings.pause_sentence);
+    app.set_pause_paragraph(settings.pause_paragraph);
     app.set_auto_save_directory(settings.auto_save_directory.clone().into());
 
     // Build the dynamic voice and language lists from downloaded models.
@@ -982,8 +984,10 @@ fn runtime_config(app: &AppWindow) -> AppConfig {
         voice: app.get_voice().to_string(),
         pitch: app.get_pitch(),
         volume: app.get_volume(),
-        emotion: app.get_emotion().to_string(),
-        pause_multiplier: app.get_pause_multiplier(),
+        voice_style: app.get_voice_style().to_string(),
+        speech_tone: app.get_speech_tone().to_string(),
+        pause_sentence: app.get_pause_sentence(),
+        pause_paragraph: app.get_pause_paragraph(),
         auto_save_directory: app.get_auto_save_directory().to_string(),
     }
 }

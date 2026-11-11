@@ -13,7 +13,9 @@ use std::{
 
 /// Emotional tone applied to synthesized speech. Engines that lack native
 /// emotion control approximate it through prosody (espeak-ng) or punctuation
-/// styling (Piper).
+/// styling (Piper). The TTS page's Voice Style selector maps onto these
+/// variants (standard → Neutral, calm → Calm, formal → Formal,
+/// friendly → Friendly); legacy values such as `happy` still parse.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Emotion {
     Neutral,
@@ -34,7 +36,50 @@ impl Emotion {
             "friendly" => Self::Friendly,
             "excited" => Self::Excited,
             "calm" => Self::Calm,
+            // The Voice Style default is `standard`, which behaves neutrally.
             _ => Self::Neutral,
+        }
+    }
+}
+
+/// Speech Tone layered on top of the Voice Style. Chosen from the TTS page
+/// (neutral, gentle, informative, conversational) and applied as small prosody
+/// shifts so the same engine can produce different delivery flavors.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SpeechTone {
+    Neutral,
+    Gentle,
+    Informative,
+    Conversational,
+}
+
+impl SpeechTone {
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_lowercase().as_str() {
+            "gentle" => Self::Gentle,
+            "informative" => Self::Informative,
+            "conversational" => Self::Conversational,
+            _ => Self::Neutral,
+        }
+    }
+
+    /// Additional pitch offset (espeak units) contributed by the tone.
+    pub fn pitch_shift(self) -> f32 {
+        match self {
+            Self::Neutral => 0.0,
+            Self::Gentle => -6.0,
+            Self::Informative => -3.0,
+            Self::Conversational => 5.0,
+        }
+    }
+
+    /// Additional words-per-minute contributed by the tone.
+    pub fn rate_shift(self) -> f32 {
+        match self {
+            Self::Neutral => 0.0,
+            Self::Gentle => -10.0,
+            Self::Informative => -5.0,
+            Self::Conversational => 12.0,
         }
     }
 }
@@ -311,11 +356,11 @@ fn speaker_id_index(voice: &str) -> Option<String> {
     (!digits.is_empty()).then_some(digits)
 }
 
-/// Piper has no prosody control, so emotion is approximated by restyling
+/// Piper has no prosody control, so voice style is approximated by restyling
 /// punctuation, which the phonemizer uses to shape intonation.
 fn piper_text(text: &str, config: &AppConfig) -> String {
-    let mut styled = with_pause_styling(text, config.pause_multiplier);
-    match Emotion::parse(&config.emotion) {
+    let mut styled = with_pause_styling(text, config.pause_sentence, config.pause_paragraph);
+    match Emotion::parse(&config.voice_style) {
         Emotion::Neutral => {}
         Emotion::Happy => styled = push_upbeat(&styled, "!"),
         Emotion::Excited => styled = push_upbeat(&styled, "!!"),
@@ -367,19 +412,37 @@ fn trim_terminal_markers(text: &str) -> String {
     result
 }
 
-/// Scale inter-sentence and inter-clause pauses by repeating espeak pause
-/// characters: each extra sentence-ending period adds roughly one second.
-fn with_pause_styling(text: &str, multiplier: f32) -> String {
-    if !multiplier.is_finite() || (multiplier - 1.0).abs() < f32::EPSILON || text.is_empty() {
+/// Scale inter-sentence, inter-clause, and inter-paragraph pauses by repeating
+/// espeak pause characters. Each additional second beyond the natural pause
+/// (~0.5 s) inserts one more delimiter, and paragraph breaks (`\n`) receive
+/// their own stretch through `pause_paragraph`.
+fn with_pause_styling(text: &str, pause_sentence: f32, pause_paragraph: f32) -> String {
+    let sentence_input = if pause_sentence.is_finite() { pause_sentence } else { 0.5 };
+    let paragraph_input = if pause_paragraph.is_finite() { pause_paragraph } else { 0.5 };
+    let extra_sentences = (sentence_input - 0.5).max(0.0).clamp(0.0, 4.0).round() as usize;
+    let extra_clauses = ((sentence_input - 0.5) / 2.0).max(0.0).clamp(0.0, 2.0).round() as usize;
+    let extra_paragraphs = (paragraph_input - 0.5).max(0.0).clamp(0.0, 5.0).round() as usize;
+    if extra_sentences == 0 && extra_clauses == 0 && extra_paragraphs == 0 {
         return text.to_string();
     }
-    let factor = multiplier.clamp(0.5, 4.0);
-    let extra_sentences = (factor - 1.0).max(0.0).round() as usize;
-    let extra_clauses = ((factor - 1.0) / 2.0).max(0.0).round() as usize;
     let mut result = String::with_capacity(text.len());
     let mut sentence: Vec<char> = Vec::new();
     for character in text.chars() {
-        if SENTENCE_DELIMITERS.contains(&character) {
+        if character == '\n' {
+            // Flush the pending sentence and stretch the paragraph gap.
+            while sentence
+                .last()
+                .is_some_and(|previous| SENTENCE_DELIMITERS.contains(previous))
+            {
+                sentence.pop();
+            }
+            result.extend(sentence.iter());
+            sentence.clear();
+            for _ in 0..extra_paragraphs {
+                result.push('.');
+            }
+            result.push('\n');
+        } else if SENTENCE_DELIMITERS.contains(&character) {
             // Trailing punctuation like "!!" belongs to one sentence end.
             while sentence
                 .last()
@@ -504,12 +567,14 @@ fn espeak_command(
 
 /// Text passed to the engine with pause styling applied.
 fn plain_text(text: &str, config: &AppConfig) -> String {
-    with_pause_styling(text, config.pause_multiplier)
+    with_pause_styling(text, config.pause_sentence, config.pause_paragraph)
 }
 
 /// espeak-ng range: -100 (low) … 100 (high); default 50 sits at the midpoint.
+/// Voice Style provides the base shift and Speech Tone layers a smaller
+/// adjustment on top so both controls remain audible.
 fn pitch_parameter(config: &AppConfig) -> i32 {
-    let emotion_shift: f32 = match Emotion::parse(&config.emotion) {
+    let style_shift: f32 = match Emotion::parse(&config.voice_style) {
         Emotion::Neutral => 0.0,
         Emotion::Happy => 12.0,
         Emotion::Excited => 18.0,
@@ -518,7 +583,8 @@ fn pitch_parameter(config: &AppConfig) -> i32 {
         Emotion::Formal => -8.0,
         Emotion::Calm => -10.0,
     };
-    (50.0 + config.pitch.clamp(-50.0, 50.0) + emotion_shift).clamp(0.0, 100.0) as i32
+    let tone_shift = SpeechTone::parse(&config.speech_tone).pitch_shift();
+    (50.0 + config.pitch.clamp(-50.0, 50.0) + style_shift + tone_shift).clamp(0.0, 100.0) as i32
 }
 
 /// espeak-ng amplitude (volume and intelligibility): 0 … 200, default 100.
@@ -526,9 +592,10 @@ fn amplitude_parameter(config: &AppConfig) -> i32 {
     (config.volume.clamp(0.0, 2.0) * 100.0).round() as i32
 }
 
-/// Words per minute, including the per-emotion tempo espeak-ng supports.
+/// Words per minute, including the per-style tempo espeak-ng supports and a
+/// smaller contribution from the chosen Speech Tone.
 fn words_per_minute(config: &AppConfig) -> u32 {
-    let emotion_rate = match Emotion::parse(&config.emotion) {
+    let style_rate = match Emotion::parse(&config.voice_style) {
         Emotion::Neutral => 0.0,
         Emotion::Happy => 10.0,
         Emotion::Excited => 25.0,
@@ -537,7 +604,8 @@ fn words_per_minute(config: &AppConfig) -> u32 {
         Emotion::Formal => -10.0,
         Emotion::Calm => -20.0,
     };
-    ((175.0 * config.speech_rate.clamp(0.5, 2.0) + emotion_rate)
+    let tone_rate = SpeechTone::parse(&config.speech_tone).rate_shift();
+    ((175.0 * config.speech_rate.clamp(0.5, 2.0) + style_rate + tone_rate)
         .clamp(80.0, 450.0)) as u32
 }
 
@@ -545,7 +613,7 @@ fn words_per_minute(config: &AppConfig) -> u32 {
 #[cfg(target_os = "linux")]
 fn espeak_voice(config: &AppConfig) -> String {
     let language = normalize_language(&config.tts_language);
-    let variant = voice_variant(&config.voice, Emotion::parse(&config.emotion));
+    let variant = voice_variant(&config.voice, Emotion::parse(&config.voice_style));
     match (language, variant.is_empty()) {
         (None, true) => "en".to_string(),
         (Some(language), true) => language,
@@ -655,62 +723,80 @@ mod tests {
     #[test]
     fn emotion_parsing_is_case_insensitive() {
         assert_eq!(Emotion::parse("  HaPPy "), Emotion::Happy);
+        // The new default voice-style value maps to Neutral.
+        assert_eq!(Emotion::parse("standard"), Emotion::Neutral);
         assert_eq!(Emotion::parse("unknown"), Emotion::Neutral);
         assert_eq!(Emotion::Happy.to_string(), "happy");
+        assert_eq!(SpeechTone::parse("Gentle"), SpeechTone::Gentle);
+        assert_eq!(SpeechTone::parse("unknown"), SpeechTone::Neutral);
     }
 
     #[test]
     fn pause_styling_scales_sentence_and_clause_delimiters() {
-        let doubled = with_pause_styling("Hello world! Fine, thanks.", 2.0);
+        // The default sentence pause (0.5 s) leaves the text untouched.
+        assert_eq!(with_pause_styling("Hello world! Fine, thanks.", 0.5, 0.5), "Hello world! Fine, thanks.");
+        // A 1.5 s sentence pause doubles each delimiter and adds one comma per clause.
+        let doubled = with_pause_styling("Hello world! Fine, thanks.", 1.5, 0.5);
         assert_eq!(doubled, "Hello world!! Fine,, thanks..");
-        // A multiplier of 1 leaves the text untouched.
-        assert_eq!(with_pause_styling("Hi!", 1.0), "Hi!");
-        assert_eq!(with_pause_styling("", 2.0), "");
+        assert_eq!(with_pause_styling("", 1.5, 1.5), "");
         // Shorter pauses never drop the original delimiter.
-        assert_eq!(with_pause_styling("Hi there.", 0.5), "Hi there.");
+        assert_eq!(with_pause_styling("Hi there.", 0.2, 0.2), "Hi there.");
     }
 
     #[test]
-    fn piper_text_restyles_terminal_punctuation_per_emotion() {
-        let base = AppConfig {
-            emotion: "happy".into(),
-            pause_multiplier: 1.0,
+    fn pause_styling_stretches_paragraph_breaks() {
+        // Default (0.5 s) sentence and paragraph pauses leave the text alone.
+        assert_eq!(with_pause_styling("Hello.\nWorld.", 0.5, 0.5), "Hello.\nWorld.");
+        // A 1.5 s paragraph pause stretches the gap before each `\n`.
+        let styled = with_pause_styling("Hello.\nWorld.", 0.5, 1.5);
+        assert_eq!(styled, "Hello..\nWorld.");
+        // A bare newline without a preceding delimiter still gets a pause.
+        let styled = with_pause_styling("Hello\nWorld", 0.5, 1.5);
+        assert_eq!(styled, "Hello.\nWorld");
+    }
+
+    #[test]
+    fn piper_text_restyles_terminal_punctuation_per_voice_style() {
+        let friendly = AppConfig {
+            voice_style: "friendly".into(),
+            pause_sentence: 0.5,
+            pause_paragraph: 0.5,
             ..AppConfig::default()
         };
-        assert_eq!(piper_text("It is done.", &base), "It is done!");
-        let sad = AppConfig {
-            emotion: "sad".into(),
+        assert_eq!(piper_text("It is done", &friendly), "It is done!");
+        let formal = AppConfig {
+            voice_style: "formal".into(),
             ..AppConfig::default()
         };
-        assert_eq!(piper_text("It is done", &sad), "It is done…");
+        assert_eq!(piper_text("It is done", &formal), "It is done.");
         let calm = AppConfig {
-            emotion: "calm".into(),
+            voice_style: "calm".into(),
             ..AppConfig::default()
         };
-        assert_eq!(piper_text("It is done.", &calm), "It is done.");
+        assert_eq!(piper_text("It is done", &calm), "It is done.");
     }
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn espeak_voice_combines_language_gender_and_emotion() {
+    fn espeak_voice_combines_language_gender_and_style() {
         let config = AppConfig {
             tts_language: "fas".into(),
             voice: "male".into(),
-            emotion: "neutral".into(),
+            voice_style: "standard".into(),
             ..AppConfig::default()
         };
         assert_eq!(espeak_voice(&config), "fas+m1");
         let config = AppConfig {
             tts_language: "auto".into(),
             voice: "female".into(),
-            emotion: "neutral".into(),
+            voice_style: "standard".into(),
             ..AppConfig::default()
         };
         assert_eq!(espeak_voice(&config), "en");
         let config = AppConfig {
             tts_language: "en-us".into(),
             voice: "whisper".into(),
-            emotion: "calm".into(),
+            voice_style: "calm".into(),
             ..AppConfig::default()
         };
         assert_eq!(espeak_voice(&config), "en-us+whisper");
@@ -721,7 +807,8 @@ mod tests {
         let config = AppConfig {
             pitch: 50.0,
             volume: 2.0,
-            emotion: "excited".into(),
+            voice_style: "friendly".into(),
+            speech_tone: "conversational".into(),
             ..AppConfig::default()
         };
         assert_eq!(pitch_parameter(&config), 100);
@@ -729,10 +816,11 @@ mod tests {
         let config = AppConfig {
             pitch: -50.0,
             volume: 0.0,
-            emotion: "sad".into(),
+            voice_style: "calm".into(),
+            speech_tone: "gentle".into(),
             ..AppConfig::default()
         };
-        assert_eq!(pitch_parameter(&config), 0); // 50 - 50 - 18 clamps at the minimum.
+        assert_eq!(pitch_parameter(&config), 0); // clamps at the minimum.
         assert_eq!(amplitude_parameter(&config), 0);
         assert!((80..=450).contains(&words_per_minute(&config)));
     }

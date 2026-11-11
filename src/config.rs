@@ -18,8 +18,16 @@ pub struct AppConfig {
     pub voice: String,
     pub pitch: f32,
     pub volume: f32,
-    pub emotion: String,
-    pub pause_multiplier: f32,
+    /// Voice Style – the delivery character chosen on the TTS page
+    /// (standard | calm | formal | friendly). Previously called `emotion`.
+    pub voice_style: String,
+    /// Speech Tone – the emotional coloring layered on top of the style
+    /// (neutral | gentle | informative | conversational).
+    pub speech_tone: String,
+    /// Approximate pause length inserted at sentence boundaries, in seconds.
+    pub pause_sentence: f32,
+    /// Approximate pause length inserted at paragraph boundaries, in seconds.
+    pub pause_paragraph: f32,
     pub auto_save_directory: String,
 }
 
@@ -36,8 +44,10 @@ impl Default for AppConfig {
             voice: "female".into(),
             pitch: 0.0,
             volume: 1.0,
-            emotion: "neutral".into(),
-            pause_multiplier: 1.0,
+            voice_style: "standard".into(),
+            speech_tone: "neutral".into(),
+            pause_sentence: 0.5,
+            pause_paragraph: 1.2,
             auto_save_directory: default_output_directory(),
         }
     }
@@ -108,8 +118,10 @@ mod tests {
         assert_eq!(restored.language, "auto");
         assert_eq!(restored.speech_rate, 1.0);
         assert_eq!(restored.tts_language, "fa");
-        assert_eq!(restored.emotion, "neutral");
-        assert_eq!(restored.pause_multiplier, 1.0);
+        assert_eq!(restored.voice_style, "standard");
+        assert_eq!(restored.speech_tone, "neutral");
+        assert_eq!(restored.pause_sentence, 0.5);
+        assert_eq!(restored.pause_paragraph, 1.2);
     }
 
     #[test]

@@ -13,13 +13,15 @@ export struct VoiceRow {
 // Workspace card for advanced speaking, prosody control, and audio export.
 export component TextToSpeechTab inherits Rectangle {
     pure function voice-to-index(voice: string) -> int {
-        return voice == "female" ? 0 : voice == "male" ? 1 : voice == "child" ? 2 :
-            voice == "whisper" ? 3 : voice == "grotesque" ? 4 : -1;
+        return voice == "female" ? 0 : voice == "male" ? 1 : -1;
     }
-    pure function emotion-to-index(emotion: string) -> int {
-        return emotion == "neutral" ? 0 : emotion == "happy" ? 1 : emotion == "sad" ? 2 :
-            emotion == "formal" ? 3 : emotion == "friendly" ? 4 : emotion == "excited" ? 5 :
-            emotion == "calm" ? 6 : -1;
+    pure function voice-style-to-index(style: string) -> int {
+        return style == "standard" ? 0 : style == "calm" ? 1 :
+            style == "formal" ? 2 : style == "friendly" ? 3 : -1;
+    }
+    pure function speech-tone-to-index(tone: string) -> int {
+        return tone == "neutral" ? 0 : tone == "gentle" ? 1 :
+            tone == "informative" ? 2 : tone == "conversational" ? 3 : -1;
     }
 
     in property <string> theme: "system";
@@ -28,11 +30,13 @@ export component TextToSpeechTab inherits Rectangle {
     in-out property <string> export-path: "";
     in-out property <string> text-file-path: "";
     in-out property <string> voice: "female";
-    in-out property <string> emotion: "neutral";
+    in-out property <string> voice-style: "standard";
+    in-out property <string> speech-tone: "neutral";
     in-out property <float> pitch: 0;
     in-out property <float> volume: 1.0;
     in-out property <float> speech-rate: 1.0;
-    in-out property <float> pause-multiplier: 1.0;
+    in-out property <float> pause-sentence: 0.5;
+    in-out property <float> pause-paragraph: 1.2;
     in-out property <string> auto-save-directory: "";
     in property <string> last-generated-file: "";
     // Dynamic voice and language lists built from the installed models.
@@ -61,28 +65,41 @@ export component TextToSpeechTab inherits Rectangle {
 
     property <bool> builtin-engine: root.voice-model-ids[root.voice-selected-index] == "";
 
+    // Built-in speaker voices: Male (natural, calm, standard) and Female
+    // (natural, gentle). Both remain available alongside downloaded models.
     property <[string]> voice-options: [
-        "Female",
-        "Male",
-        "Child",
-        "Whisper",
-        "Grotesque",
+        "Female · natural, gentle",
+        "Male · natural, calm, standard",
     ];
     property <[string]> voice-values: [
         "female",
         "male",
-        "child",
-        "whisper",
-        "grotesque",
     ];
-    property <[string]> emotion-options: [
-        "Neutral",
-        "Happy",
-        "Sad",
+    // Voice Style controls overall delivery character.
+    property <[string]> voice-style-options: [
+        "Standard",
+        "Calm",
         "Formal",
         "Friendly",
-        "Excited",
-        "Calm",
+    ];
+    property <[string]> voice-style-values: [
+        "standard",
+        "calm",
+        "formal",
+        "friendly",
+    ];
+    // Speech Tone controls the emotional coloring of the reading.
+    property <[string]> speech-tone-options: [
+        "Neutral",
+        "Gentle",
+        "Informative",
+        "Conversational",
+    ];
+    property <[string]> speech-tone-values: [
+        "neutral",
+        "gentle",
+        "informative",
+        "conversational",
     ];
 
     property <color> palette-surface: root.theme == "dark" ? #161e2c : #ffffff;
@@ -92,6 +109,7 @@ export component TextToSpeechTab inherits Rectangle {
     property <color> palette-field: root.theme == "dark" ? #101722 : #f8fafc;
     property <color> palette-accent: root.theme == "dark" ? #1f2a51 : #eef2ff;
     property <color> palette-hover: root.theme == "dark" ? #1c2536 : #f1f5f9;
+    property <color> palette-highlight: #4f46e5;
 
     background: root.palette-surface;
     border-radius: 14px;
@@ -107,12 +125,12 @@ export component TextToSpeechTab inherits Rectangle {
             title: "Text to Speech";
             subtitle: "Natural voices, multilingual reading, and prosody control. Text stays on this device.";
             badge-text: "TTS";
-            badge-color: #4f46e5;
+            badge-color: root.palette-highlight;
         }
 
         TextEdit {
             text <=> root.speech-text;
-            min-height: 180px;
+            min-height: 140px;
             font-size: 16px;
             wrap: word-wrap;
         }
@@ -123,13 +141,22 @@ export component TextToSpeechTab inherits Rectangle {
             color: root.palette-muted;
         }
 
-        // Voice model, speaker, language, and tone selection
+        // ─── Voice Settings ─── the most important section of the software
+        Rectangle { height: 1px; background: root.palette-border; }
         Text {
-            text: "VOICE & TONE";
-            font-size: 10px;
+            text: "VOICE SETTINGS";
+            font-size: 11px;
             font-weight: 700;
-            color: root.palette-muted;
+            color: root.palette-highlight;
         }
+        Text {
+            text: "Pick a speaker voice and refine style, tone, speed, pitch, volume, and natural pauses.";
+            font-size: 11px;
+            color: root.palette-muted;
+            wrap: word-wrap;
+        }
+
+        // Downloaded voice models, grouped by language. Kept intact.
         VerticalLayout {
             spacing: 4px;
             Text {
@@ -137,8 +164,6 @@ export component TextToSpeechTab inherits Rectangle {
                 font-size: 11px;
                 color: root.palette-muted;
             }
-            // Dropdown selector: every downloaded model is one option, grouped
-            // by its language prefix, alongside the built-in engine.
             ComboBox {
                 model: root.voice-labels;
                 current-index <=> root.voice-selected-index;
@@ -154,12 +179,15 @@ export component TextToSpeechTab inherits Rectangle {
                 wrap: word-wrap;
             }
         }
+
+        // Row 1: speaker voice (male/female), language, voice style, speech tone.
         HorizontalLayout {
             spacing: 14px;
             VerticalLayout {
                 spacing: 4px;
+                horizontal-stretch: 1;
                 Text {
-                    text: "Speaker voice (built-in engine)";
+                    text: "Select Voice (Male / Female)";
                     font-size: 11px;
                     color: root.palette-muted;
                 }
@@ -174,6 +202,7 @@ export component TextToSpeechTab inherits Rectangle {
             }
             VerticalLayout {
                 spacing: 4px;
+                horizontal-stretch: 1;
                 Text {
                     text: "Language";
                     font-size: 11px;
@@ -186,63 +215,54 @@ export component TextToSpeechTab inherits Rectangle {
             }
             VerticalLayout {
                 spacing: 4px;
+                horizontal-stretch: 1;
                 Text {
-                    text: "Emotion";
+                    text: "Voice Style";
                     font-size: 11px;
                     color: root.palette-muted;
                 }
                 ComboBox {
-                    model: root.emotion-options;
-                    current-index: root.emotion-to-index(root.emotion);
+                    model: root.voice-style-options;
+                    current-index: root.voice-style-to-index(root.voice-style);
                     changed current-index => {
-                        root.emotion = root.emotion-options[self.current-index].to-lowercase();
+                        root.voice-style = root.voice-style-values[self.current-index];
                     }
                 }
             }
-            Rectangle { horizontal-stretch: 1; }
+            VerticalLayout {
+                spacing: 4px;
+                horizontal-stretch: 1;
+                Text {
+                    text: "Speech Tone";
+                    font-size: 11px;
+                    color: root.palette-muted;
+                }
+                ComboBox {
+                    model: root.speech-tone-options;
+                    current-index: root.speech-tone-to-index(root.speech-tone);
+                    changed current-index => {
+                        root.speech-tone = root.speech-tone-values[self.current-index];
+                    }
+                }
+            }
         }
 
-        // Prosody sliders: pitch, volume, speed, pauses
-        HorizontalLayout {
-            spacing: 14px;
-            VerticalLayout {
-                spacing: 2px;
-                horizontal-stretch: 1;
-                Text {
-                    text: "Pitch: " + (root.pitch >= 0 ? "+" : "") + Math.round(root.pitch) + " (low ↔ high)";
-                    font-size: 11px;
-                    color: root.palette-muted;
-                }
-                Slider {
-                    value <=> root.pitch;
-                    minimum: -50;
-                    maximum: 50;
-                    step: 1;
-                }
-            }
-            VerticalLayout {
-                spacing: 2px;
-                horizontal-stretch: 1;
-                Text {
-                    text: "Volume: " + Math.round(root.volume * 100) + "%";
-                    font-size: 11px;
-                    color: root.palette-muted;
-                }
-                Slider {
-                    value <=> root.volume;
-                    minimum: 0.2;
-                    maximum: 2.0;
-                    step: 0.05;
-                }
-            }
+        // Voice style / tone descriptions so users see what each option means.
+        Text {
+            text: "Style: standard · calm · formal · friendly    ·    Tone: neutral · gentle · informative · conversational";
+            font-size: 11px;
+            color: root.palette-muted;
+            wrap: word-wrap;
         }
+
+        // Row 2: prosody sliders – speech speed, pitch, volume.
         HorizontalLayout {
             spacing: 14px;
             VerticalLayout {
                 spacing: 2px;
                 horizontal-stretch: 1;
                 Text {
-                    text: "Speech speed: " + root.speech-rate + "x";
+                    text: "Speech Speed: " + root.speech-rate + "x  (0.5x ↔ 2x)";
                     font-size: 11px;
                     color: root.palette-muted;
                 }
@@ -257,15 +277,65 @@ export component TextToSpeechTab inherits Rectangle {
                 spacing: 2px;
                 horizontal-stretch: 1;
                 Text {
-                    text: "Pause length: " + root.pause-multiplier + "x";
+                    text: "Pitch: " + (root.pitch >= 0 ? "+" : "") + Math.round(root.pitch) + "  (deeper ↔ higher)";
                     font-size: 11px;
                     color: root.palette-muted;
                 }
                 Slider {
-                    value <=> root.pause-multiplier;
+                    value <=> root.pitch;
+                    minimum: -50;
+                    maximum: 50;
+                    step: 1;
+                }
+            }
+            VerticalLayout {
+                spacing: 2px;
+                horizontal-stretch: 1;
+                Text {
+                    text: "Volume: " + Math.round(root.volume * 100) + "%  (output intensity)";
+                    font-size: 11px;
+                    color: root.palette-muted;
+                }
+                Slider {
+                    value <=> root.volume;
+                    minimum: 0.2;
+                    maximum: 2.0;
+                    step: 0.05;
+                }
+            }
+        }
+
+        // Row 3: natural pauses – between sentences and between paragraphs.
+        HorizontalLayout {
+            spacing: 14px;
+            VerticalLayout {
+                spacing: 2px;
+                horizontal-stretch: 1;
+                Text {
+                    text: "Pause Between Sentences: " + Math.round(root.pause-sentence * 10) / 10 + "s";
+                    font-size: 11px;
+                    color: root.palette-muted;
+                }
+                Slider {
+                    value <=> root.pause-sentence;
+                    minimum: 0.2;
+                    maximum: 3.0;
+                    step: 0.1;
+                }
+            }
+            VerticalLayout {
+                spacing: 2px;
+                horizontal-stretch: 1;
+                Text {
+                    text: "Pause Between Paragraphs: " + Math.round(root.pause-paragraph * 10) / 10 + "s";
+                    font-size: 11px;
+                    color: root.palette-muted;
+                }
+                Slider {
+                    value <=> root.pause-paragraph;
                     minimum: 0.5;
-                    maximum: 4.0;
-                    step: 0.5;
+                    maximum: 5.0;
+                    step: 0.25;
                 }
             }
         }
