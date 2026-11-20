@@ -15,10 +15,13 @@ use std::{
     time::Duration,
 };
 use tts::{
-    audio,
-    config::{self, AppConfig},
+    audio, batch,
+    config::AppConfig,
+    documents,
+    playback::{self, PlaybackSnapshot},
+    preprocess,
     stt::{SpeechRecognizer, WhisperCliRecognizer},
-    tts::{LocalSynthesizer, SpeechSynthesizer},
+    tts::{ExportFormat, LocalSynthesizer, SpeechSynthesizer},
 };
 
 static MODEL_SEARCH_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -28,6 +31,8 @@ static TTS_LANGUAGE_APPLIED: AtomicI32 = AtomicI32::new(-1);
 static TTS_VOICE_APPLIED: AtomicI32 = AtomicI32::new(-1);
 static TTS_VOICE_ROW_APPLIED: AtomicI32 = AtomicI32::new(-1);
 static STT_MODEL_APPLIED: AtomicI32 = AtomicI32::new(-1);
+// Coalesces playback-speed slider drag events so the player restarts once.
+static PLAYBACK_SPEED_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Deserialize)]
 struct LanguageOptionData {
@@ -226,7 +231,7 @@ fn apply_tts_voices(weak: &slint::Weak<AppWindow>, catalog: &[LanguageOptionData
 
     // The supported built-in languages stay on top; model languages extend the list.
     let mut language_codes: Vec<String> =
-        ["fa", "en", "ar", "tr"].iter().map(|code| code.to_string()).collect();
+        ["auto", "fa", "en", "ar", "tr"].iter().map(|code| code.to_string()).collect();
     for (language, _, _) in &entries {
         if language != "other" && !language_codes.contains(language) {
             language_codes.push(language.clone());
@@ -338,6 +343,9 @@ fn set_selected_language(app: &AppWindow, code: &str) {
 }
 
 fn language_display(code: &str, catalog: &[LanguageOptionData]) -> String {
+    if code == "auto" {
+        return "Auto-detect".into();
+    }
     if code == "other" {
         return "Unspecified".into();
     }
@@ -425,6 +433,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.set_pause_sentence(settings.pause_sentence);
     app.set_pause_paragraph(settings.pause_paragraph);
     app.set_auto_save_directory(settings.auto_save_directory.clone().into());
+    app.set_output_quality(settings.output_quality.clone().into());
+    app.set_playback_speed(settings.playback_speed);
+    app.set_batch_format(settings.batch_format.clone().into());
+    app.set_batch_output_directory(settings.batch_output_directory.clone().into());
 
     // Build the dynamic voice and language lists from downloaded models.
     apply_tts_voices(&app.as_weak(), &language_catalog);
@@ -490,6 +502,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let recording = audio::new_recording_state();
 
+    // Playback deck: the controller drives ffplay off the UI thread and
+    // reports snapshots back; the status bar only changes on transitions.
+    let weak = app.as_weak();
+    let last_playback_status = Arc::new(std::sync::Mutex::new(String::from("idle")));
+    let playback = playback::PlaybackController::new(move |snapshot: PlaybackSnapshot| {
+        let weak = weak.clone();
+        let last_status = Arc::clone(&last_playback_status);
+        if let Err(error) = slint::invoke_from_event_loop(move || {
+            let Some(app) = weak.upgrade() else {
+                return;
+            };
+            app.set_playback_status(snapshot.status.as_str().into());
+            app.set_playback_position(snapshot.position);
+            app.set_playback_duration(snapshot.duration);
+            app.set_playback_ready(snapshot.ready);
+            app.set_playback_sentence_index(snapshot.sentence_index);
+            app.set_playback_sentence_count(snapshot.sentence_count);
+            app.set_playback_sentence_text(snapshot.sentence_text.into());
+            if app.get_read_along_enabled() {
+                app.set_current_word_index(snapshot.word_index);
+            }
+            let status = snapshot.status.as_str();
+            let mut last = match last_status.lock() {
+                Ok(last) => last,
+                Err(_) => return,
+            };
+            if *last != status {
+                *last = status.to_string();
+                let message = match status {
+                    "playing" => "Playing the generated audio.".to_string(),
+                    "paused" => "Playback paused.".to_string(),
+                    "finished" if !snapshot.error.is_empty() => {
+                        format!("Playback failed: {}", snapshot.error)
+                    }
+                    "finished" => "Playback finished.".to_string(),
+                    _ => "Playback stopped.".to_string(),
+                };
+                app.set_status_text(message.into());
+            }
+        }) {
+            eprintln!("Could not update the playback deck: {error}");
+        }
+    });
+
     let weak = app.as_weak();
     app.on_update_text_stats(move |text| {
         if let Some(app) = weak.upgrade() {
@@ -505,22 +561,147 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let weak = app.as_weak();
+    let speak_playback = playback.clone();
     app.on_speak(move |text| {
         let weak = weak.clone();
-        let text = text.to_string();
+        let playback = speak_playback.clone();
+        let raw = text.to_string();
+        // Snapshot the settings on the UI thread: Weak::upgrade() returns
+        // None off the event-loop thread, so worker threads cannot read the
+        // live configuration.
+        let settings = match weak.upgrade() {
+            Some(app) => runtime_config(&app),
+            None => return,
+        };
         thread::spawn(move || {
-            let settings = load_runtime_config(&weak);
-            let result = LocalSynthesizer.speak(&text, &settings);
-            let message = match result {
-                Ok(Some(path)) => {
-                    let message = format!("Speech finished. File saved to {}.", path.display());
-                    set_last_generated_file(weak.clone(), path.display().to_string());
-                    message
+            let normalized = preprocess::normalize(&raw);
+            let direction = preprocess::detect_direction(&normalized).as_str().to_string();
+            let detected = preprocess::detect_language(&normalized);
+            let mut settings = settings;
+            // Resolve the Auto-detect choice to the analyzed language so the
+            // engine speaks in the right language instead of a fixed default.
+            if settings.tts_language.trim().is_empty() || settings.tts_language == "auto" {
+                settings.tts_language = detected.clone().unwrap_or_else(|| "fa".into());
+            }
+            let ui_direction = direction.clone();
+            let ui_detected = detected.clone().unwrap_or_default();
+            let report_weak = weak.clone();
+            if let Err(error) = slint::invoke_from_event_loop(move || {
+                if let Some(app) = report_weak.upgrade() {
+                    app.set_text_direction(ui_direction.into());
+                    app.set_detected_language(ui_detected.into());
+                    app.set_status_text("Synthesizing speech…".into());
                 }
-                Ok(None) => "Speech finished.".to_string(),
-                Err(error) => error.to_string(),
-            };
-            set_status(weak, message);
+            }) {
+                eprintln!("Could not update the UI: {error}");
+            }
+            let words = preprocess::segment_words(&normalized);
+            // Always publish the word timeline: the checkbox only controls
+            // visibility, so read-along can be switched on mid-playback.
+            let items: Vec<ReadAlongWord> = words
+                .iter()
+                .map(|word| ReadAlongWord {
+                    text: word.clone().into(),
+                })
+                .collect();
+            let model_weak = weak.clone();
+            if let Err(error) = slint::invoke_from_event_loop(move || {
+                if let Some(app) = model_weak.upgrade() {
+                    app.set_read_along_words(slint::ModelRc::new(slint::VecModel::from(items)));
+                    app.set_current_word_index(-1);
+                }
+            }) {
+                eprintln!("Could not update the read-along list: {error}");
+            }
+            // Synthesize once, keep the downloadable copy, then hand the clip
+            // to the playback deck so pause, seeking, sentence skips, and live
+            // speed remain available for the whole reading.
+            match LocalSynthesizer::prepare_playback(&normalized, &settings) {
+                Ok((path, duration)) => {
+                    if let Some(destination) = tts::tts::auto_save_path(&settings, "wav") {
+                        if let Some(parent) = destination.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        match std::fs::copy(&path, &destination) {
+                            Ok(_) => set_last_generated_file(
+                                weak.clone(),
+                                destination.display().to_string(),
+                            ),
+                            Err(error) => eprintln!("Could not save the speech file: {error}"),
+                        }
+                    }
+                    let timeline = tts::tts::word_timeline(&words, duration);
+                    let sentences = playback::sentence_spans(&timeline);
+                    let clip = playback::Clip {
+                        path,
+                        duration,
+                        words: timeline,
+                        sentences,
+                    };
+                    if let Err(error) = playback.start(clip, settings.playback_speed) {
+                        set_status(weak, error.to_string());
+                    }
+                }
+                Err(error) => set_status(weak, error.to_string()),
+            }
+        });
+    });
+
+    let playback_toggle = playback.clone();
+    let weak = app.as_weak();
+    app.on_playback_toggle(move || {
+        if let Err(error) = playback_toggle.toggle() {
+            set_status(weak.clone(), error.to_string());
+        }
+    });
+
+    let playback_stop = playback.clone();
+    let weak = app.as_weak();
+    app.on_playback_stop(move || {
+        if let Err(error) = playback_stop.stop() {
+            set_status(weak.clone(), error.to_string());
+        }
+    });
+
+    let playback_seek = playback.clone();
+    let weak = app.as_weak();
+    app.on_playback_seek(move |position| {
+        if let Err(error) = playback_seek.seek(position) {
+            set_status(weak.clone(), error.to_string());
+        }
+    });
+
+    let playback_skip = playback.clone();
+    let weak = app.as_weak();
+    app.on_playback_skip(move |seconds| {
+        if let Err(error) = playback_skip.skip(seconds) {
+            set_status(weak.clone(), error.to_string());
+        }
+    });
+
+    let playback_sentence = playback.clone();
+    let weak = app.as_weak();
+    app.on_playback_sentence(move |direction| {
+        if let Err(error) = playback_sentence.step_sentence(direction) {
+            set_status(weak.clone(), error.to_string());
+        }
+    });
+
+    let playback_speed = playback.clone();
+    let weak = app.as_weak();
+    app.on_playback_speed_changed(move |speed| {
+        // Coalesce slider drag events so the player restarts once, not per step.
+        let generation = PLAYBACK_SPEED_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+        let playback = playback_speed.clone();
+        let weak = weak.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(150));
+            if PLAYBACK_SPEED_GENERATION.load(Ordering::SeqCst) != generation {
+                return;
+            }
+            if let Err(error) = playback.set_speed(speed) {
+                set_status(weak, error.to_string());
+            }
         });
     });
 
@@ -739,60 +920,131 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_load_text(move |path| {
         let weak = weak.clone();
         let path = PathBuf::from(path.to_string());
-        thread::spawn(move || match config::read_text_file(&path) {
-            Ok(text) => {
+        thread::spawn(move || match documents::extract_text(&path) {
+            Ok(extracted) => {
+                let text = preprocess::normalize(&extracted);
                 if let Err(error) = slint::invoke_from_event_loop(move || {
                     if let Some(app) = weak.upgrade() {
                         app.set_speech_text(text.into());
-                        app.set_status_text("Text file loaded.".into());
+                        app.set_status_text("Document loaded.".into());
                     }
                 }) {
                     eprintln!("Could not update the UI: {error}");
                 }
             }
-            Err(error) => set_status(weak, format!("Could not load text: {error}")),
+            Err(error) => set_status(weak, format!("Could not load document: {error}")),
         });
     });
 
     let weak = app.as_weak();
     app.on_export_wav(move |destination| {
-        let weak = weak.clone();
-        let destination = PathBuf::from(destination.to_string());
-        let Some(app) = weak.upgrade() else {
-            return;
-        };
-        let text = app.get_speech_text().to_string();
-        drop(app);
-        thread::spawn(move || {
-            let settings = load_runtime_config(&weak);
-            let result = LocalSynthesizer.export_wav(&text, &destination, &settings);
-            set_status(
-                weak,
-                result
-                    .map(|()| format!("WAV exported to {}.", destination.display()))
-                    .unwrap_or_else(|error| error.to_string()),
-            );
-        });
+        export_audio(
+            weak.clone(),
+            PathBuf::from(destination.to_string()),
+            ExportFormat::Wav,
+        );
     });
 
     let weak = app.as_weak();
     app.on_export_mp3(move |destination| {
+        export_audio(
+            weak.clone(),
+            PathBuf::from(destination.to_string()),
+            ExportFormat::Mp3,
+        );
+    });
+
+    let weak = app.as_weak();
+    app.on_export_ogg(move |destination| {
+        export_audio(
+            weak.clone(),
+            PathBuf::from(destination.to_string()),
+            ExportFormat::Ogg,
+        );
+    });
+
+    let weak = app.as_weak();
+    app.on_batch_convert(move |paths, output_directory, format| {
         let weak = weak.clone();
-        let destination = PathBuf::from(destination.to_string());
-        let Some(app) = weak.upgrade() else {
-            return;
-        };
-        let text = app.get_speech_text().to_string();
-        drop(app);
-        thread::spawn(move || {
-            let settings = load_runtime_config(&weak);
-            let result = LocalSynthesizer.export_mp3(&text, &destination, &settings);
+        let inputs = batch::collect_inputs(paths.as_str());
+        if inputs.is_empty() {
             set_status(
                 weak,
-                result
-                    .map(|()| format!("MP3 exported to {}.", destination.display()))
-                    .unwrap_or_else(|error| error.to_string()),
+                "No input files found. List .txt, .md, .pdf, or .docx files, or a folder containing them."
+                    .into(),
             );
+            return;
+        }
+        let format = ExportFormat::parse(format.as_str());
+        let output_directory = PathBuf::from(output_directory.to_string());
+        // Snapshot the settings on the UI thread; worker threads cannot
+        // upgrade the weak handle (Slint restricts it to the event loop).
+        let settings = match weak.upgrade() {
+            Some(app) => runtime_config(&app),
+            None => return,
+        };
+        set_batch_state(
+            weak.clone(),
+            true,
+            format!("Converting {} file(s)…", inputs.len()),
+        );
+        thread::spawn(move || {
+            let mut settings = settings;
+            let output_directory = if output_directory.as_os_str().is_empty() {
+                PathBuf::from(settings.auto_save_directory.clone())
+            } else {
+                output_directory
+            };
+            if output_directory.as_os_str().is_empty() {
+                set_batch_state(
+                    weak.clone(),
+                    false,
+                    "Choose an output folder for the batch conversion.".into(),
+                );
+                return;
+            }
+            // Keep the download copies inside the batch output folder instead
+            // of duplicating every file into the general auto-save directory.
+            settings.auto_save_directory = output_directory.display().to_string();
+            let progress_weak = weak.clone();
+            let result = batch::convert_batch(
+                &inputs,
+                format,
+                &output_directory,
+                &settings,
+                move |current, total, name| {
+                    set_batch_status(
+                        progress_weak.clone(),
+                        format!("Converting {current} / {total}: {name}"),
+                    );
+                },
+            );
+            match result {
+                Ok(report) => {
+                    let mut message = format!(
+                        "Batch finished: {} of {} file(s) converted to {} in {}.",
+                        report.converted,
+                        inputs.len(),
+                        format.label(),
+                        output_directory.display()
+                    );
+                    if !report.failures.is_empty() {
+                        let details = report
+                            .failures
+                            .iter()
+                            .map(|(name, error)| format!("{name}: {error}"))
+                            .collect::<Vec<_>>()
+                            .join(" · ");
+                        message.push_str(&format!(" Failed: {details}"));
+                    }
+                    set_batch_state(weak.clone(), false, message.clone());
+                    set_status(weak, message);
+                }
+                Err(error) => {
+                    set_batch_state(weak.clone(), false, error.to_string());
+                    set_status(weak, error.to_string());
+                }
+            }
         });
     });
 
@@ -989,9 +1241,15 @@ fn runtime_config(app: &AppWindow) -> AppConfig {
         pause_sentence: app.get_pause_sentence(),
         pause_paragraph: app.get_pause_paragraph(),
         auto_save_directory: app.get_auto_save_directory().to_string(),
+        output_quality: app.get_output_quality().to_string(),
+        playback_speed: app.get_playback_speed(),
+        batch_format: app.get_batch_format().to_string(),
+        batch_output_directory: app.get_batch_output_directory().to_string(),
     }
 }
 
+/// Read the live configuration. Only valid on the UI thread: outside the
+/// event loop Weak::upgrade() returns None and this falls back to defaults.
 fn load_runtime_config(weak: &slint::Weak<AppWindow>) -> AppConfig {
     weak.upgrade()
         .map(|app| runtime_config(&app))
@@ -1015,6 +1273,54 @@ fn set_last_generated_file(weak: slint::Weak<AppWindow>, path: String) {
         }
     }) {
         eprintln!("Could not update the UI: {error}");
+    }
+}
+
+/// Synthesize the current text and export it in the chosen container at the
+/// selected quality preset, off the UI thread.
+fn export_audio(weak: slint::Weak<AppWindow>, destination: PathBuf, format: ExportFormat) {
+    let Some(app) = weak.upgrade() else {
+        return;
+    };
+    let text = app.get_speech_text().to_string();
+    // Capture the settings while still on the UI thread: Weak::upgrade()
+    // returns None from worker threads, which would silently fall back to
+    // the default quality preset.
+    let settings = runtime_config(&app);
+    drop(app);
+    thread::spawn(move || {
+        let result = match format {
+            ExportFormat::Wav => LocalSynthesizer.export_wav(&text, &destination, &settings),
+            ExportFormat::Mp3 => LocalSynthesizer.export_mp3(&text, &destination, &settings),
+            ExportFormat::Ogg => LocalSynthesizer.export_ogg(&text, &destination, &settings),
+        };
+        set_status(
+            weak,
+            result
+                .map(|()| format!("{} exported to {}.", format.label(), destination.display()))
+                .unwrap_or_else(|error| error.to_string()),
+        );
+    });
+}
+
+fn set_batch_status(weak: slint::Weak<AppWindow>, message: String) {
+    if let Err(error) = slint::invoke_from_event_loop(move || {
+        if let Some(app) = weak.upgrade() {
+            app.set_batch_status(message.into());
+        }
+    }) {
+        eprintln!("Could not update the batch status: {error}");
+    }
+}
+
+fn set_batch_state(weak: slint::Weak<AppWindow>, busy: bool, message: String) {
+    if let Err(error) = slint::invoke_from_event_loop(move || {
+        if let Some(app) = weak.upgrade() {
+            app.set_batch_busy(busy);
+            app.set_batch_status(message.into());
+        }
+    }) {
+        eprintln!("Could not update the batch state: {error}");
     }
 }
 

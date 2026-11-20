@@ -1,5 +1,6 @@
-import { Button, ComboBox, LineEdit, Slider, TextEdit, VerticalBox } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit, Slider, TextEdit, VerticalBox } from "std-widgets.slint";
 import { PageHeader } from "../components/page-header.slint";
+import { PageScrollView } from "../components/page-scroll-view.slint";
 
 // One row of the categorized voice-model list: a language header or a
 // selectable voice entry mapped back to its entry by entry-index.
@@ -10,7 +11,13 @@ export struct VoiceRow {
     selected: bool,
 }
 
-// Workspace card for advanced speaking, prosody control, and audio export.
+// One display token in the read-along timeline.
+export struct ReadAlongWord {
+    text: string,
+}
+
+// Workspace card for advanced speaking, prosody control, playback, and audio
+// export. The whole page scrolls so every control stays reachable.
 export component TextToSpeechTab inherits Rectangle {
     pure function voice-to-index(voice: string) -> int {
         return voice == "female" ? 0 : voice == "male" ? 1 : -1;
@@ -22,6 +29,19 @@ export component TextToSpeechTab inherits Rectangle {
     pure function speech-tone-to-index(tone: string) -> int {
         return tone == "neutral" ? 0 : tone == "gentle" ? 1 :
             tone == "informative" ? 2 : tone == "conversational" ? 3 : -1;
+    }
+    pure function quality-to-index(quality: string) -> int {
+        return quality == "low" ? 0 : quality == "standard" ? 1 :
+            quality == "high" ? 2 : quality == "maximum" ? 3 : 2;
+    }
+    pure function batch-format-to-index(format: string) -> int {
+        return format == "wav" ? 0 : format == "mp3" ? 1 : format == "ogg" ? 2 : 1;
+    }
+    // Compact m:ss clock for the playback deck.
+    pure function format-time(value: float) -> string {
+        return Math.floor(value / 60) + ":"
+            + (Math.mod(Math.floor(value), 60) < 10 ? "0" : "")
+            + Math.mod(Math.floor(value), 60);
     }
 
     in property <string> theme: "system";
@@ -57,11 +77,48 @@ export component TextToSpeechTab inherits Rectangle {
     in-out property <int> language-selected-index: 0;
     in property <string> installed-summary: "";
 
+    // Read-along highlighting and automatic language/direction analysis.
+    in property <[ReadAlongWord]> read-along-words: [];
+    in-out property <bool> read-along-enabled: false;
+    in property <int> current-word-index: -1;
+    in property <string> text-direction: "ltr";
+    in property <string> detected-language: "";
+
+    // Playback deck state, driven live by the Rust playback controller.
+    in property <string> playback-status: "idle";
+    in property <float> playback-position: 0;
+    in property <float> playback-duration: 0;
+    in property <bool> playback-ready: false;
+    in property <int> sentence-index: -1;
+    in property <int> sentence-count: 0;
+    in property <string> sentence-text: "";
+    in-out property <float> playback-speed: 1.0;
+    // Scrubbing preview: while dragging the seek bar the thumb follows the
+    // pointer, and the jump is committed only on release.
+    property <bool> scrubbing: false;
+    property <float> scrub-position: 0;
+    property <float> displayed-position: root.scrubbing ? root.scrub-position : root.playback-position;
+
+    // Output quality and batch conversion.
+    in-out property <string> output-quality: "high";
+    in-out property <string> batch-paths: "";
+    in-out property <string> batch-output-directory: "";
+    in-out property <string> batch-format: "mp3";
+    in property <string> batch-status: "";
+    in property <bool> batch-busy: false;
+
     callback speak(string);
     callback export-wav(string);
     callback export-mp3(string);
+    callback export-ogg(string);
     callback load-text(string);
     callback open-export-folder(string);
+    callback playback-toggle();
+    callback playback-stop();
+    callback playback-seek(float);
+    callback playback-skip(float);
+    callback playback-sentence(int);
+    callback batch-convert(string, string, string);
 
     property <bool> builtin-engine: root.voice-model-ids[root.voice-selected-index] == "";
 
@@ -101,6 +158,24 @@ export component TextToSpeechTab inherits Rectangle {
         "informative",
         "conversational",
     ];
+    // Output quality presets: MP3/OGG bitrate and WAV sample rate.
+    property <[string]> quality-options: [
+        "Low · 96 kbps · small files",
+        "Standard · 160 kbps · balanced",
+        "High · 256 kbps · detailed",
+        "Maximum · 320 kbps · studio",
+    ];
+    property <[string]> quality-values: [
+        "low",
+        "standard",
+        "high",
+        "maximum",
+    ];
+    property <[string]> batch-format-values: [
+        "wav",
+        "mp3",
+        "ogg",
+    ];
 
     property <color> palette-surface: root.theme == "dark" ? #161e2c : #ffffff;
     property <color> palette-border: root.theme == "dark" ? #2c3a52 : #e2e8f0;
@@ -110,340 +185,707 @@ export component TextToSpeechTab inherits Rectangle {
     property <color> palette-accent: root.theme == "dark" ? #1f2a51 : #eef2ff;
     property <color> palette-hover: root.theme == "dark" ? #1c2536 : #f1f5f9;
     property <color> palette-highlight: #4f46e5;
+    property <color> palette-playing: #22c55e;
+    property <color> palette-paused: #f59e0b;
+
+    vertical-stretch: 1;
 
     background: root.palette-surface;
     border-radius: 14px;
     border-width: 1px;
     border-color: root.palette-border;
 
-    VerticalBox {
-        padding: 22px;
-        spacing: 12px;
+    PageScrollView {
+        track-color: root.palette-border;
+        thumb-color: root.palette-highlight;
+        thumb-hover-color: root.theme == "dark" ? #7c72ff : #4338ca;
+        VerticalBox {
+            width: parent.width;
+            padding: 22px;
+            spacing: 12px;
 
-        PageHeader {
-            theme: root.theme;
-            title: "Text to Speech";
-            subtitle: "Natural voices, multilingual reading, and prosody control. Text stays on this device.";
-            badge-text: "TTS";
-            badge-color: root.palette-highlight;
-        }
+            PageHeader {
+                theme: root.theme;
+                title: "Text to Speech";
+                subtitle: "Natural voices, multilingual reading, and prosody control. Text stays on this device.";
+                badge-text: "TTS";
+                badge-color: root.palette-highlight;
+            }
 
-        TextEdit {
-            text <=> root.speech-text;
-            min-height: 140px;
-            font-size: 16px;
-            wrap: word-wrap;
-        }
+            TextEdit {
+                text <=> root.speech-text;
+                min-height: 140px;
+                font-size: 16px;
+                wrap: word-wrap;
+                horizontal-alignment: root.text-direction == "rtl" ? right : left;
+            }
 
-        Text {
-            text: root.text-stats;
-            font-size: 12px;
-            color: root.palette-muted;
-        }
-
-        // ─── Voice Settings ─── the most important section of the software
-        Rectangle { height: 1px; background: root.palette-border; }
-        Text {
-            text: "VOICE SETTINGS";
-            font-size: 11px;
-            font-weight: 700;
-            color: root.palette-highlight;
-        }
-        Text {
-            text: "Pick a speaker voice and refine style, tone, speed, pitch, volume, and natural pauses.";
-            font-size: 11px;
-            color: root.palette-muted;
-            wrap: word-wrap;
-        }
-
-        // Downloaded voice models, grouped by language. Kept intact.
-        VerticalLayout {
-            spacing: 4px;
+            // Live character and word counts for the text about to be spoken.
             Text {
-                text: "Voice model (downloaded models, grouped by language)";
-                font-size: 11px;
+                text: root.text-stats;
+                font-size: 12px;
                 color: root.palette-muted;
             }
-            ComboBox {
-                model: root.voice-labels;
-                current-index <=> root.voice-selected-index;
-                horizontal-stretch: 1;
-            }
+
+            // Automatic language and text-direction detection results.
             Text {
-                text: root.voice-labels.length <= 1
-                    ? "Only the built-in engine is available. Download voice models in the Models tab to add languages here."
-                    : "Installed by language: " + root.installed-summary
-                        + "  ·  Piper (.onnx) voices can speak directly; other formats need a Piper-compatible export.";
+                text: "Detected language: "
+                    + (root.detected-language == "" ? "not detected" : root.detected-language)
+                    + "  ·  Direction: " + (root.text-direction == "rtl" ? "Right-to-left" : "Left-to-right");
                 font-size: 11px;
                 color: root.palette-muted;
                 wrap: word-wrap;
             }
-        }
 
-        // Row 1: speaker voice (male/female), language, voice style, speech tone.
-        HorizontalLayout {
-            spacing: 14px;
-            VerticalLayout {
-                spacing: 4px;
-                horizontal-stretch: 1;
-                Text {
-                    text: "Select Voice (Male / Female)";
-                    font-size: 11px;
-                    color: root.palette-muted;
+            // Read-along highlighting: the whole text is spoken in one consistent
+            // voice while the current word is emphasized during playback.
+            CheckBox {
+                text: "Read along (highlight the current word while playing)";
+                checked <=> root.read-along-enabled;
+            }
+            if root.read-along-enabled && root.read-along-words.length > 0: Rectangle {
+                height: 180px;
+                border-radius: 12px;
+                background: root.palette-field;
+                border-width: 1px;
+                border-color: root.palette-border;
+                clip: true;
+
+                // Teleprompter-style word stream: uniform row heights keep the
+                // auto-follow offset exact, the spoken word rides a highlight
+                // band in the middle, and the edges fade into the card.
+                property <length> row-height: 26px;
+                property <int> word-index: root.current-word-index;
+                property <length> follow-y: Math.min(
+                    Math.max(0px, stream.content-height - self.height),
+                    Math.max(0px, self.word-index * self.row-height
+                        - self.height / 2 + self.row-height / 2));
+                changed word-index => { stream.scroll-y = -self.follow-y; }
+                init => { stream.scroll-y = -self.follow-y; }
+
+                stream := PageScrollView {
+                    width: parent.width;
+                    height: parent.height;
+                    track-color: root.palette-border;
+                    thumb-color: root.palette-highlight;
+                    thumb-hover-color: root.theme == "dark" ? #7c72ff : #4338ca;
+                    VerticalLayout {
+                        width: parent.width - 14px;
+                        spacing: 0px;
+                        padding: 0px;
+                        for word[index] in root.read-along-words: Rectangle {
+                            height: 26px;
+                            background: index == root.current-word-index
+                                ? root.palette-highlight.with-alpha(root.theme == "dark" ? 0.18 : 0.12)
+                                : transparent;
+                            Text {
+                                width: parent.width;
+                                height: parent.height;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                text: word.text;
+                                font-size: 15px;
+                                font-weight: index == root.current-word-index ? 700 : 400;
+                                color: index == root.current-word-index
+                                    ? (root.theme == "dark" ? #a5b4fc : #4338ca)
+                                    : root.palette-muted;
+                            }
+                        }
+                    }
                 }
-                ComboBox {
-                    enabled: root.builtin-engine;
-                    model: root.voice-options;
-                    current-index: root.voice-to-index(root.voice);
-                    changed current-index => {
-                        root.voice = root.voice-values[self.current-index];
+                Rectangle {
+                    y: 1px;
+                    width: parent.width - 14px;
+                    height: 32px;
+                    background: @linear-gradient(180deg,
+                        root.palette-field 0%, root.palette-field.with-alpha(0) 100%);
+                }
+                Rectangle {
+                    y: parent.height - 33px;
+                    width: parent.width - 14px;
+                    height: 32px;
+                    background: @linear-gradient(180deg,
+                        root.palette-field.with-alpha(0) 0%, root.palette-field 100%);
+                }
+            }
+
+            // ─── Playback ─── transport, seeking, sentence navigation, and
+            // live speed for the last synthesized clip.
+            Rectangle { height: 1px; background: root.palette-border; }
+            Text {
+                text: "PLAYBACK";
+                font-size: 11px;
+                font-weight: 700;
+                color: root.palette-highlight;
+            }
+            Text {
+                text: root.playback-ready
+                    ? "Control the generated audio: pause, jump between sentences, or change speed while listening."
+                    : "Press Speak to generate audio; the deck below then plays, pauses, and navigates the clip.";
+                font-size: 11px;
+                color: root.palette-muted;
+                wrap: word-wrap;
+            }
+
+            Rectangle {
+                border-radius: 12px;
+                background: root.palette-field;
+                border-width: 1px;
+                border-color: root.palette-border;
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 10px;
+
+                    // Seek bar: click or drag to scrub; the fill and thumb
+                    // follow the live position reported by the engine.
+                    Rectangle {
+                        height: 20px;
+                        property <float> ratio: root.playback-duration > 0
+                            ? Math.min(1, Math.max(0, root.displayed-position / root.playback-duration))
+                            : 0;
+                        Rectangle {
+                            y: 7px;
+                            height: 6px;
+                            width: parent.width;
+                            border-radius: 3px;
+                            background: root.palette-border;
+                        }
+                        Rectangle {
+                            y: 7px;
+                            height: 6px;
+                            width: parent.width * parent.ratio;
+                            border-radius: 3px;
+                            background: root.playback-status == "paused"
+                                ? root.palette-paused
+                                : root.palette-highlight;
+                        }
+                        Rectangle {
+                            y: 3px;
+                            width: 14px;
+                            height: 14px;
+                            border-radius: 7px;
+                            x: Math.max(0px, Math.min(parent.width - 14px, parent.width * parent.ratio - 7px));
+                            background: root.playback-status == "paused"
+                                ? root.palette-paused
+                                : root.palette-highlight;
+                            border-width: 2px;
+                            border-color: root.palette-surface;
+                        }
+                        TouchArea {
+                            enabled: root.playback-ready;
+                            mouse-cursor: pointer;
+                            pointer-event(event) => {
+                                if (event.kind == PointerEventKind.down) {
+                                    root.scrubbing = true;
+                                    root.scrub-position = root.playback-duration
+                                        * Math.min(1, Math.max(0, self.mouse-x / self.width));
+                                }
+                                if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                                    if (root.scrubbing) {
+                                        root.scrubbing = false;
+                                        root.playback-seek(root.playback-duration
+                                            * Math.min(1, Math.max(0, self.mouse-x / self.width)));
+                                    }
+                                }
+                            }
+                            moved => {
+                                if (root.scrubbing) {
+                                    root.scrub-position = root.playback-duration
+                                        * Math.min(1, Math.max(0, self.mouse-x / self.width));
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        Text {
+                            text: root.format-time(root.displayed-position) + " / " + root.format-time(root.playback-duration);
+                            font-size: 12px;
+                            color: root.palette-text;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text {
+                            text: root.playback-status == "playing" ? "Playing"
+                                : root.playback-status == "paused" ? "Paused"
+                                : root.playback-status == "finished" ? "Finished"
+                                : "Ready";
+                            font-size: 12px;
+                            font-weight: 700;
+                            color: root.playback-status == "playing" ? root.palette-playing
+                                : root.playback-status == "paused" ? root.palette-paused
+                                : root.playback-status == "finished" ? root.palette-highlight
+                                : root.palette-muted;
+                        }
+                    }
+
+                    // Transport: previous/next sentence, ±10 s, play/pause, stop.
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Button {
+                            text: "Prev sentence";
+                            enabled: root.playback-ready;
+                            clicked => {
+                                root.playback-sentence(-1);
+                            }
+                        }
+                        Button {
+                            text: "-10s";
+                            enabled: root.playback-ready;
+                            clicked => {
+                                root.playback-skip(-10);
+                            }
+                        }
+                        Button {
+                            text: root.playback-status == "playing" ? "Pause" : "Play";
+                            primary: true;
+                            enabled: root.playback-ready;
+                            clicked => {
+                                root.playback-toggle();
+                            }
+                        }
+                        Button {
+                            text: "Stop";
+                            enabled: root.playback-ready;
+                            clicked => {
+                                root.playback-stop();
+                            }
+                        }
+                        Button {
+                            text: "+10s";
+                            enabled: root.playback-ready;
+                            clicked => {
+                                root.playback-skip(10);
+                            }
+                        }
+                        Button {
+                            text: "Next sentence";
+                            enabled: root.playback-ready;
+                            clicked => {
+                                root.playback-sentence(1);
+                            }
+                        }
+                    }
+
+                    // Current sentence preview, synced with the playhead.
+                    if root.playback-ready && root.sentence-count > 0: VerticalLayout {
+                        spacing: 2px;
+                        Text {
+                            text: "Sentence " + (root.sentence-index + 1) + " / " + root.sentence-count;
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: root.palette-highlight;
+                        }
+                        Text {
+                            text: root.sentence-text;
+                            font-size: 12px;
+                            color: root.palette-muted;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 2px;
+                        Text {
+                            text: "Playback Speed: " + Math.round(root.playback-speed * 100) / 100 + "x  (0.5x ↔ 2x, applied live)";
+                            font-size: 11px;
+                            color: root.palette-muted;
+                        }
+                        Slider {
+                            value <=> root.playback-speed;
+                            minimum: 0.5;
+                            maximum: 2.0;
+                            step: 0.05;
+                        }
                     }
                 }
             }
+
+            // ─── Voice Settings ─── the most important section of the software
+            Rectangle { height: 1px; background: root.palette-border; }
+            Text {
+                text: "VOICE SETTINGS";
+                font-size: 11px;
+                font-weight: 700;
+                color: root.palette-highlight;
+            }
+            Text {
+                text: "Pick a speaker voice and refine style, tone, speed, pitch, volume, and natural pauses.";
+                font-size: 11px;
+                color: root.palette-muted;
+                wrap: word-wrap;
+            }
+
+            // Downloaded voice models, grouped by language. Kept intact.
             VerticalLayout {
                 spacing: 4px;
-                horizontal-stretch: 1;
                 Text {
-                    text: "Language";
+                    text: "Voice model (downloaded models, grouped by language)";
                     font-size: 11px;
                     color: root.palette-muted;
                 }
                 ComboBox {
-                    model: root.language-labels;
-                    current-index <=> root.language-selected-index;
-                }
-            }
-            VerticalLayout {
-                spacing: 4px;
-                horizontal-stretch: 1;
-                Text {
-                    text: "Voice Style";
-                    font-size: 11px;
-                    color: root.palette-muted;
-                }
-                ComboBox {
-                    model: root.voice-style-options;
-                    current-index: root.voice-style-to-index(root.voice-style);
-                    changed current-index => {
-                        root.voice-style = root.voice-style-values[self.current-index];
-                    }
-                }
-            }
-            VerticalLayout {
-                spacing: 4px;
-                horizontal-stretch: 1;
-                Text {
-                    text: "Speech Tone";
-                    font-size: 11px;
-                    color: root.palette-muted;
-                }
-                ComboBox {
-                    model: root.speech-tone-options;
-                    current-index: root.speech-tone-to-index(root.speech-tone);
-                    changed current-index => {
-                        root.speech-tone = root.speech-tone-values[self.current-index];
-                    }
-                }
-            }
-        }
-
-        // Voice style / tone descriptions so users see what each option means.
-        Text {
-            text: "Style: standard · calm · formal · friendly    ·    Tone: neutral · gentle · informative · conversational";
-            font-size: 11px;
-            color: root.palette-muted;
-            wrap: word-wrap;
-        }
-
-        // Row 2: prosody sliders – speech speed, pitch, volume.
-        HorizontalLayout {
-            spacing: 14px;
-            VerticalLayout {
-                spacing: 2px;
-                horizontal-stretch: 1;
-                Text {
-                    text: "Speech Speed: " + root.speech-rate + "x  (0.5x ↔ 2x)";
-                    font-size: 11px;
-                    color: root.palette-muted;
-                }
-                Slider {
-                    value <=> root.speech-rate;
-                    minimum: 0.5;
-                    maximum: 2.0;
-                    step: 0.05;
-                }
-            }
-            VerticalLayout {
-                spacing: 2px;
-                horizontal-stretch: 1;
-                Text {
-                    text: "Pitch: " + (root.pitch >= 0 ? "+" : "") + Math.round(root.pitch) + "  (deeper ↔ higher)";
-                    font-size: 11px;
-                    color: root.palette-muted;
-                }
-                Slider {
-                    value <=> root.pitch;
-                    minimum: -50;
-                    maximum: 50;
-                    step: 1;
-                }
-            }
-            VerticalLayout {
-                spacing: 2px;
-                horizontal-stretch: 1;
-                Text {
-                    text: "Volume: " + Math.round(root.volume * 100) + "%  (output intensity)";
-                    font-size: 11px;
-                    color: root.palette-muted;
-                }
-                Slider {
-                    value <=> root.volume;
-                    minimum: 0.2;
-                    maximum: 2.0;
-                    step: 0.05;
-                }
-            }
-        }
-
-        // Row 3: natural pauses – between sentences and between paragraphs.
-        HorizontalLayout {
-            spacing: 14px;
-            VerticalLayout {
-                spacing: 2px;
-                horizontal-stretch: 1;
-                Text {
-                    text: "Pause Between Sentences: " + Math.round(root.pause-sentence * 10) / 10 + "s";
-                    font-size: 11px;
-                    color: root.palette-muted;
-                }
-                Slider {
-                    value <=> root.pause-sentence;
-                    minimum: 0.2;
-                    maximum: 3.0;
-                    step: 0.1;
-                }
-            }
-            VerticalLayout {
-                spacing: 2px;
-                horizontal-stretch: 1;
-                Text {
-                    text: "Pause Between Paragraphs: " + Math.round(root.pause-paragraph * 10) / 10 + "s";
-                    font-size: 11px;
-                    color: root.palette-muted;
-                }
-                Slider {
-                    value <=> root.pause-paragraph;
-                    minimum: 0.5;
-                    maximum: 5.0;
-                    step: 0.25;
-                }
-            }
-        }
-
-        Rectangle { height: 1px; background: root.palette-border; }
-
-        // Generated audio files
-        Text {
-            text: "AUDIO FILES";
-            font-size: 10px;
-            font-weight: 700;
-            color: root.palette-muted;
-        }
-        Rectangle {
-            height: 46px;
-            border-radius: 10px;
-            background: root.palette-field;
-            border-width: 1px;
-            border-color: root.palette-border;
-            HorizontalLayout {
-                padding: 7px;
-                spacing: 8px;
-                LineEdit {
-                    text <=> root.auto-save-directory;
-                    placeholder-text: "Auto-save directory for spoken audio";
+                    model: root.voice-labels;
+                    current-index <=> root.voice-selected-index;
                     horizontal-stretch: 1;
                 }
-                Button {
-                    text: "Open folder";
-                    clicked => {
-                        root.open-export-folder(root.auto-save-directory);
+                Text {
+                    text: root.voice-labels.length <= 1
+                        ? "Only the built-in engine is available. Download voice models in the Models tab to add languages here."
+                        : "Installed by language: " + root.installed-summary
+                            + "  ·  Piper (.onnx) voices can speak directly; other formats need a Piper-compatible export.";
+                    font-size: 11px;
+                    color: root.palette-muted;
+                    wrap: word-wrap;
+                }
+            }
+
+            // Row 1: speaker voice (male/female), language, voice style, speech tone.
+            HorizontalLayout {
+                spacing: 14px;
+                VerticalLayout {
+                    spacing: 4px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: "Select Voice (Male / Female)";
+                        font-size: 11px;
+                        color: root.palette-muted;
+                    }
+                    ComboBox {
+                        enabled: root.builtin-engine;
+                        model: root.voice-options;
+                        current-index: root.voice-to-index(root.voice);
+                        changed current-index => {
+                            root.voice = root.voice-values[self.current-index];
+                        }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: "Language";
+                        font-size: 11px;
+                        color: root.palette-muted;
+                    }
+                    ComboBox {
+                        model: root.language-labels;
+                        current-index <=> root.language-selected-index;
+                    }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: "Voice Style";
+                        font-size: 11px;
+                        color: root.palette-muted;
+                    }
+                    ComboBox {
+                        model: root.voice-style-options;
+                        current-index: root.voice-style-to-index(root.voice-style);
+                        changed current-index => {
+                            root.voice-style = root.voice-style-values[self.current-index];
+                        }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: "Speech Tone";
+                        font-size: 11px;
+                        color: root.palette-muted;
+                    }
+                    ComboBox {
+                        model: root.speech-tone-options;
+                        current-index: root.speech-tone-to-index(root.speech-tone);
+                        changed current-index => {
+                            root.speech-tone = root.speech-tone-values[self.current-index];
+                        }
                     }
                 }
             }
-        }
-        Text {
-            text: root.last-generated-file == "" ?
-                "Speaking automatically saves a downloadable WAV file in the folder above." :
-                "Last file: " + root.last-generated-file;
-            font-size: 11px;
-            color: root.palette-muted;
-            wrap: word-wrap;
-        }
-        HorizontalLayout {
-            spacing: 10px;
+
+            // Voice style / tone descriptions so users see what each option means.
+            Text {
+                text: "Style: standard · calm · formal · friendly    ·    Tone: neutral · gentle · informative · conversational";
+                font-size: 11px;
+                color: root.palette-muted;
+                wrap: word-wrap;
+            }
+
+            // Row 2: prosody sliders – speech speed, pitch, volume.
+            HorizontalLayout {
+                spacing: 14px;
+                VerticalLayout {
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: "Speech Speed: " + root.speech-rate + "x  (0.5x ↔ 2x)";
+                        font-size: 11px;
+                        color: root.palette-muted;
+                    }
+                    Slider {
+                        value <=> root.speech-rate;
+                        minimum: 0.5;
+                        maximum: 2.0;
+                        step: 0.05;
+                    }
+                }
+                VerticalLayout {
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: "Pitch: " + (root.pitch >= 0 ? "+" : "") + Math.round(root.pitch) + "  (deeper ↔ higher)";
+                        font-size: 11px;
+                        color: root.palette-muted;
+                    }
+                    Slider {
+                        value <=> root.pitch;
+                        minimum: -50;
+                        maximum: 50;
+                        step: 1;
+                    }
+                }
+                VerticalLayout {
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: "Volume: " + Math.round(root.volume * 100) + "%  (output intensity)";
+                        font-size: 11px;
+                        color: root.palette-muted;
+                    }
+                    Slider {
+                        value <=> root.volume;
+                        minimum: 0.2;
+                        maximum: 2.0;
+                        step: 0.05;
+                    }
+                }
+            }
+
+            // Row 3: natural pauses – between sentences and between paragraphs.
+            HorizontalLayout {
+                spacing: 14px;
+                VerticalLayout {
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: "Pause Between Sentences: " + Math.round(root.pause-sentence * 10) / 10 + "s";
+                        font-size: 11px;
+                        color: root.palette-muted;
+                    }
+                    Slider {
+                        value <=> root.pause-sentence;
+                        minimum: 0.2;
+                        maximum: 3.0;
+                        step: 0.1;
+                    }
+                }
+                VerticalLayout {
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: "Pause Between Paragraphs: " + Math.round(root.pause-paragraph * 10) / 10 + "s";
+                        font-size: 11px;
+                        color: root.palette-muted;
+                    }
+                    Slider {
+                        value <=> root.pause-paragraph;
+                        minimum: 0.5;
+                        maximum: 5.0;
+                        step: 0.25;
+                    }
+                }
+            }
+
+            Rectangle { height: 1px; background: root.palette-border; }
+
+            // Generated audio files and export formats.
+            Text {
+                text: "AUDIO FILES";
+                font-size: 10px;
+                font-weight: 700;
+                color: root.palette-muted;
+            }
             Rectangle {
                 height: 46px;
                 border-radius: 10px;
                 background: root.palette-field;
                 border-width: 1px;
                 border-color: root.palette-border;
-                horizontal-stretch: 1;
                 HorizontalLayout {
                     padding: 7px;
                     spacing: 8px;
                     LineEdit {
-                        text <=> root.export-path;
-                        placeholder-text: "Export file path (.wav or .mp3)";
+                        text <=> root.auto-save-directory;
+                        placeholder-text: "Auto-save directory for spoken audio";
                         horizontal-stretch: 1;
                     }
                     Button {
-                        text: "Export WAV";
+                        text: "Open folder";
                         clicked => {
-                            root.export-wav(root.export-path);
+                            root.open-export-folder(root.auto-save-directory);
                         }
+                    }
+                }
+            }
+            Text {
+                text: root.last-generated-file == "" ?
+                    "Speaking automatically saves a downloadable WAV file in the folder above and loads it into the playback deck." :
+                    "Last file: " + root.last-generated-file;
+                font-size: 11px;
+                color: root.palette-muted;
+                wrap: word-wrap;
+            }
+
+            // Output quality: applies to WAV sample rate and MP3/OGG bitrate.
+            VerticalLayout {
+                spacing: 4px;
+                Text {
+                    text: "Output Quality (MP3/OGG bitrate · WAV sample rate)";
+                    font-size: 11px;
+                    color: root.palette-muted;
+                }
+                ComboBox {
+                    model: root.quality-options;
+                    current-index: root.quality-to-index(root.output-quality);
+                    changed current-index => {
+                        root.output-quality = root.quality-values[self.current-index];
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+                Rectangle {
+                    height: 46px;
+                    border-radius: 10px;
+                    background: root.palette-field;
+                    border-width: 1px;
+                    border-color: root.palette-border;
+                    horizontal-stretch: 1;
+                    HorizontalLayout {
+                        padding: 7px;
+                        spacing: 8px;
+                        LineEdit {
+                            text <=> root.export-path;
+                            placeholder-text: "Export file path (.wav, .mp3, or .ogg)";
+                            horizontal-stretch: 1;
+                        }
+                        Button {
+                            text: "Export WAV";
+                            clicked => {
+                                root.export-wav(root.export-path);
+                            }
+                        }
+                        Button {
+                            text: "Export MP3";
+                            clicked => {
+                                root.export-mp3(root.export-path);
+                            }
+                        }
+                        Button {
+                            text: "Export OGG";
+                            clicked => {
+                                root.export-ogg(root.export-path);
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 46px;
+                border-radius: 10px;
+                background: root.palette-field;
+                border-width: 1px;
+                border-color: root.palette-border;
+                HorizontalLayout {
+                    padding: 7px;
+                    spacing: 8px;
+                    LineEdit {
+                        text <=> root.text-file-path;
+                        placeholder-text: "Path to a UTF-8 .txt file (books, articles, documents)";
+                        horizontal-stretch: 1;
                     }
                     Button {
-                        text: "Export MP3";
+                        text: "Load text file";
                         clicked => {
-                            root.export-mp3(root.export-path);
+                            root.load-text(root.text-file-path);
                         }
                     }
                 }
             }
-        }
 
-        Rectangle {
-            height: 46px;
-            border-radius: 10px;
-            background: root.palette-field;
-            border-width: 1px;
-            border-color: root.palette-border;
-            HorizontalLayout {
-                padding: 7px;
-                spacing: 8px;
-                LineEdit {
-                    text <=> root.text-file-path;
-                    placeholder-text: "Path to a UTF-8 .txt file (books, articles, documents)";
-                    horizontal-stretch: 1;
-                }
-                Button {
-                    text: "Load text file";
-                    clicked => {
-                        root.load-text(root.text-file-path);
+            // ─── Batch conversion ─── many documents to audio in one pass.
+            Rectangle { height: 1px; background: root.palette-border; }
+            Text {
+                text: "BATCH CONVERSION";
+                font-size: 11px;
+                font-weight: 700;
+                color: root.palette-highlight;
+            }
+            Text {
+                text: "Convert several documents at once. List files or folders separated by ; or , — folders are scanned for .txt, .md, .pdf, and .docx. Each file keeps its own name in the output folder.";
+                font-size: 11px;
+                color: root.palette-muted;
+                wrap: word-wrap;
+            }
+            Rectangle {
+                border-radius: 10px;
+                background: root.palette-field;
+                border-width: 1px;
+                border-color: root.palette-border;
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 8px;
+                    LineEdit {
+                        text <=> root.batch-paths;
+                        placeholder-text: "Files or folders, e.g. /home/me/books; /home/me/articles/chapter1.txt";
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        LineEdit {
+                            text <=> root.batch-output-directory;
+                            placeholder-text: "Output folder (empty = auto-save folder above)";
+                            horizontal-stretch: 1;
+                        }
+                        ComboBox {
+                            model: ["WAV", "MP3", "OGG"];
+                            current-index: root.batch-format-to-index(root.batch-format);
+                            changed current-index => {
+                                root.batch-format = root.batch-format-values[self.current-index];
+                            }
+                        }
+                        Button {
+                            text: root.batch-busy ? "Converting…" : "Convert batch";
+                            primary: true;
+                            enabled: !root.batch-busy;
+                            clicked => {
+                                root.batch-convert(root.batch-paths, root.batch-output-directory, root.batch-format);
+                            }
+                        }
+                    }
+                    if root.batch-status != "": Text {
+                        text: root.batch-status;
+                        font-size: 11px;
+                        color: root.palette-muted;
+                        wrap: word-wrap;
                     }
                 }
             }
-        }
 
-        HorizontalLayout {
-            spacing: 10px;
-            alignment: end;
-            Button {
-                text: "Speak";
-                height: 42px;
-                primary: true;
-                clicked => {
-                    root.speak(root.speech-text);
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: end;
+                Button {
+                    text: "Speak";
+                    height: 42px;
+                    primary: true;
+                    clicked => {
+                        root.speak(root.speech-text);
+                    }
                 }
             }
         }

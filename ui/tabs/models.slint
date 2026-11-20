@@ -1,4 +1,5 @@
-import { Button, LineEdit, ProgressIndicator, ScrollView, VerticalBox } from "std-widgets.slint";
+import { Button, LineEdit, ProgressIndicator, VerticalBox } from "std-widgets.slint";
+import { PageScrollView } from "../components/page-scroll-view.slint";
 import { PageHeader } from "../components/page-header.slint";
 
 export struct HubModel {
@@ -67,6 +68,7 @@ export component ModelsTab inherits Rectangle {
     property <color> palette-accent: #4f46e5;
     property <color> palette-ok: #10b981;
     property <color> palette-warn: #f59e0b;
+    vertical-stretch: 1;
 
     changed language-search => {
         root.search-languages(root.language-search);
@@ -211,10 +213,11 @@ export component ModelsTab inherits Rectangle {
             }
         }
 
-        ScrollView {
+        PageScrollView {
             content-width: root.width - 46px;
-            horizontal-stretch: 1;
-            vertical-stretch: 1;
+            track-color: root.palette-border;
+            thumb-color: root.palette-accent;
+            thumb-hover-color: root.theme == "dark" ? #7c72ff : #4338ca;
             GridLayout {
                 spacing: 12px;
                 for model[index] in root.models: Rectangle {

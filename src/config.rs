@@ -29,6 +29,16 @@ pub struct AppConfig {
     /// Approximate pause length inserted at paragraph boundaries, in seconds.
     pub pause_paragraph: f32,
     pub auto_save_directory: String,
+    /// Export quality preset (low | standard | high | maximum): MP3 bitrate,
+    /// OGG Vorbis quality, and the sample rate WAV exports are delivered at.
+    pub output_quality: String,
+    /// Live playback speed of the TTS playback deck (0.5x … 2x), independent
+    /// of the synthesis speech rate.
+    pub playback_speed: f32,
+    /// Container format used by batch conversion (wav | mp3 | ogg).
+    pub batch_format: String,
+    /// Destination folder for batch conversion; empty means the auto-save folder.
+    pub batch_output_directory: String,
 }
 
 impl Default for AppConfig {
@@ -49,6 +59,10 @@ impl Default for AppConfig {
             pause_sentence: 0.5,
             pause_paragraph: 1.2,
             auto_save_directory: default_output_directory(),
+            output_quality: "high".into(),
+            playback_speed: 1.0,
+            batch_format: "mp3".into(),
+            batch_output_directory: String::new(),
         }
     }
 }
@@ -122,6 +136,10 @@ mod tests {
         assert_eq!(restored.speech_tone, "neutral");
         assert_eq!(restored.pause_sentence, 0.5);
         assert_eq!(restored.pause_paragraph, 1.2);
+        assert_eq!(restored.output_quality, "high");
+        assert_eq!(restored.playback_speed, 1.0);
+        assert_eq!(restored.batch_format, "mp3");
+        assert!(restored.batch_output_directory.is_empty());
     }
 
     #[test]
@@ -134,5 +152,8 @@ mod tests {
         assert_eq!(restored.pitch, 0.0);
         assert_eq!(restored.volume, 1.0);
         assert!(!restored.auto_save_directory.is_empty());
+        assert_eq!(restored.output_quality, "high");
+        assert_eq!(restored.playback_speed, 1.0);
+        assert_eq!(restored.batch_format, "mp3");
     }
 }

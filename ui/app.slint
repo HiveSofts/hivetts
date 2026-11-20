@@ -2,7 +2,8 @@ import { StatusBar } from "components/status-bar.slint";
 import { SideNavigation } from "components/side-navigation.slint";
 import { HubModel, LanguageOption, ModelsTab } from "tabs/models.slint";
 import { SpeechToTextTab } from "tabs/speech-to-text.slint";
-import { TextToSpeechTab, VoiceRow } from "tabs/text-to-speech.slint";
+import { TextToSpeechTab, VoiceRow, ReadAlongWord } from "tabs/text-to-speech.slint";
+import { Palette } from "std-widgets.slint";
 
 export component AppWindow inherits Window {
     title: "HiveTTS";
@@ -10,6 +11,15 @@ export component AppWindow inherits Window {
     preferred-height: 820px;
     min-width: 780px;
     min-height: 600px;
+
+    // Standard widgets otherwise follow the system color scheme, which leaves
+    // white widget text on the light theme's pale surfaces. Tie them to the
+    // app theme; "system" keeps following the desktop.
+    pure function scheme-for(theme: string) -> ColorScheme {
+        return theme == "light" ? ColorScheme.light
+            : theme == "dark" ? ColorScheme.dark : ColorScheme.unknown;
+    }
+    init => { Palette.color-scheme = root.scheme-for(root.theme); }
 
     in-out property <string> speech-text: "";
     in-out property <string> transcript-text: "";
@@ -37,6 +47,21 @@ export component AppWindow inherits Window {
     in-out property <float> pause-paragraph: 1.2;
     in-out property <string> auto-save-directory: "";
     in-out property <string> last-generated-file: "";
+    // Playback deck and audio output on the TTS page.
+    in-out property <float> playback-speed: 1.0;
+    in property <string> playback-status: "idle";
+    in property <float> playback-position: 0;
+    in property <float> playback-duration: 0;
+    in property <bool> playback-ready: false;
+    in property <int> playback-sentence-index: -1;
+    in property <int> playback-sentence-count: 0;
+    in property <string> playback-sentence-text: "";
+    in-out property <string> output-quality: "high";
+    in-out property <string> batch-paths: "";
+    in-out property <string> batch-output-directory: "";
+    in-out property <string> batch-format: "mp3";
+    in property <string> batch-status: "";
+    in property <bool> batch-busy: false;
     in-out property <[string]> tts-voice-labels: ["Built-in engine (eSpeak NG)"];
     in property <[string]> tts-voice-model-ids: [""];
     in property <[string]> tts-voice-model-files: [""];
@@ -54,6 +79,12 @@ export component AppWindow inherits Window {
     in property <[string]> tts-language-codes: ["fa", "en", "ar", "tr"];
     in-out property <int> tts-language-index: 0;
     in property <string> installed-language-summary: "";
+    // Read-along highlighting and automatic language/direction analysis.
+    in-out property <[ReadAlongWord]> read-along-words: [];
+    in-out property <bool> read-along-enabled: false;
+    in-out property <int> current-word-index: -1;
+    in-out property <string> text-direction: "ltr";
+    in-out property <string> detected-language: "";
     in-out property <[HubModel]> model-cards: [];
     // Categorized downloaded STT models for the Speech-to-Text selector.
     in property <[string]> stt-model-labels: [];
@@ -72,7 +103,15 @@ export component AppWindow inherits Window {
     callback load-text(string);
     callback export-wav(string);
     callback export-mp3(string);
+    callback export-ogg(string);
     callback open-export-folder(string);
+    callback playback-toggle();
+    callback playback-stop();
+    callback playback-seek(float);
+    callback playback-skip(float);
+    callback playback-sentence(int);
+    callback playback-speed-changed(float);
+    callback batch-convert(string, string, string);
     callback transcribe-file(string);
     callback save-settings();
     callback download-model(string);
@@ -136,7 +175,21 @@ export component AppWindow inherits Window {
     changed auto-save-directory => {
         root.save-settings();
     }
+    changed playback-speed => {
+        root.playback-speed-changed(root.playback-speed);
+        root.save-settings();
+    }
+    changed output-quality => {
+        root.save-settings();
+    }
+    changed batch-format => {
+        root.save-settings();
+    }
+    changed batch-output-directory => {
+        root.save-settings();
+    }
     changed theme => {
+        Palette.color-scheme = root.scheme-for(root.theme);
         root.save-settings();
     }
     changed tts-language-index => {
@@ -192,6 +245,20 @@ export component AppWindow inherits Window {
                 pause-paragraph <=> root.pause-paragraph;
                 auto-save-directory <=> root.auto-save-directory;
                 last-generated-file: root.last-generated-file;
+                playback-speed <=> root.playback-speed;
+                playback-status: root.playback-status;
+                playback-position: root.playback-position;
+                playback-duration: root.playback-duration;
+                playback-ready: root.playback-ready;
+                sentence-index: root.playback-sentence-index;
+                sentence-count: root.playback-sentence-count;
+                sentence-text: root.playback-sentence-text;
+                output-quality <=> root.output-quality;
+                batch-paths <=> root.batch-paths;
+                batch-output-directory <=> root.batch-output-directory;
+                batch-format <=> root.batch-format;
+                batch-status: root.batch-status;
+                batch-busy: root.batch-busy;
                 voice-labels: root.tts-voice-labels;
                 voice-model-ids: root.tts-voice-model-ids;
                 voice-selected-index <=> root.tts-voice-index;
@@ -203,6 +270,11 @@ export component AppWindow inherits Window {
                 language-labels: root.tts-language-labels;
                 language-selected-index <=> root.tts-language-index;
                 installed-summary: root.installed-language-summary;
+                read-along-words: root.read-along-words;
+                read-along-enabled <=> root.read-along-enabled;
+                current-word-index: root.current-word-index;
+                text-direction: root.text-direction;
+                detected-language: root.detected-language;
                 speak(text) => {
                     root.speak(text);
                 }
@@ -211,6 +283,27 @@ export component AppWindow inherits Window {
                 }
                 export-mp3(path) => {
                     root.export-mp3(path);
+                }
+                export-ogg(path) => {
+                    root.export-ogg(path);
+                }
+                playback-toggle => {
+                    root.playback-toggle();
+                }
+                playback-stop => {
+                    root.playback-stop();
+                }
+                playback-seek(position) => {
+                    root.playback-seek(position);
+                }
+                playback-skip(seconds) => {
+                    root.playback-skip(seconds);
+                }
+                playback-sentence(direction) => {
+                    root.playback-sentence(direction);
+                }
+                batch-convert(paths, output, format) => {
+                    root.batch-convert(paths, output, format);
                 }
                 open-export-folder(path) => {
                     root.open-export-folder(path);
@@ -280,7 +373,7 @@ export component AppWindow inherits Window {
                 }
             }
 
-            Rectangle { }
+            Rectangle { vertical-stretch: 0; }
 
             StatusBar {
                 theme: root.theme;

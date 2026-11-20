@@ -1,0 +1,105 @@
+// Scroll region whose scrollbar is drawn in the app's own visual language:
+// a rounded track and thumb taken from the page palette, with hover/press
+// feedback, a draggable thumb, click-to-jump track, and wheel support over
+// the bar. The Flickable underneath handles wheel and touch flicking over
+// the content itself. The bar overlays the content's right padding so the
+// viewport width never depends on the scroll range (no binding loops).
+export component PageScrollView inherits Rectangle {
+    in property <color> track-color: #2c3a52;
+    in property <color> thumb-color: #4f46e5;
+    in property <color> thumb-hover-color: #7c72ff;
+    in property <length> bar-width: 8px;
+    in-out property <length> content-width <=> flickable.content-width;
+    in-out property <length> content-height <=> flickable.content-height;
+    in-out property <length> scroll-y <=> flickable.content-y;
+
+    clip: true;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    preferred-width: 100%;
+    preferred-height: 100%;
+    min-width: 50px;
+    min-height: 50px;
+
+    // Scroll range and thumb geometry, all derived from the live content.
+    property <length> maximum: Math.max(0px, flickable.content-height - flickable.height);
+    property <length> value: Math.min(root.maximum, Math.max(0px, -flickable.content-y));
+    property <length> thumb-height: Math.max(28px,
+        bar.height * flickable.height / Math.max(1px, flickable.content-height));
+    property <length> travel: Math.max(1px, bar.height - root.thumb-height);
+
+    flickable := Flickable {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        mouse-drag-pan-enabled: false;
+        @children
+    }
+
+    bar := Rectangle {
+        visible: root.maximum > 0px;
+        x: parent.width - root.bar-width - 3px;
+        y: 3px;
+        width: root.bar-width;
+        height: parent.height - 6px;
+        border-radius: root.bar-width / 2;
+        background: root.track-color;
+
+        // Clicking the track jumps so the thumb centers on the pointer.
+        track-touch := TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    flickable.content-y = -Math.min(root.maximum, Math.max(0px,
+                        (self.mouse-y - root.thumb-height / 2) / root.travel * root.maximum));
+                }
+            }
+            scroll-event(event) => {
+                if (event.delta-y != 0) {
+                    flickable.content-y = -Math.min(root.maximum, Math.max(0px, root.value - event.delta-y));
+                    return accept;
+                }
+                reject
+            }
+        }
+
+        thumb := Rectangle {
+            width: parent.width;
+            height: root.thumb-height;
+            y: root.maximum > 0px ? root.travel * root.value / root.maximum : 0px;
+            border-radius: root.bar-width / 2;
+            background: thumb-touch.has-hover || thumb-touch.pressed
+                ? root.thumb-hover-color
+                : root.thumb-color;
+            animate background { duration: 120ms; }
+
+            thumb-touch := TouchArea {
+                // The thumb moves while it is dragged, so a relative mouse-y
+                // delta would feed the thumb's own motion back into itself and
+                // halve the travel. Track the pointer in window coordinates.
+                property <length> saved-pointer-y;
+                property <length> saved-value;
+                pointer-event(event) => {
+                    if (event.kind == PointerEventKind.down) {
+                        self.saved-pointer-y = self.absolute-position.y + self.mouse-y;
+                        self.saved-value = root.value;
+                    }
+                }
+                moved => {
+                    if (self.pressed) {
+                        flickable.content-y = -Math.min(root.maximum, Math.max(0px,
+                            self.saved-value + (self.absolute-position.y + self.mouse-y
+                                - self.saved-pointer-y) * root.maximum / root.travel));
+                    }
+                }
+                scroll-event(event) => {
+                    if (event.delta-y != 0) {
+                        flickable.content-y = -Math.min(root.maximum, Math.max(0px, root.value - event.delta-y));
+                        return accept;
+                    }
+                    reject
+                }
+            }
+        }
+    }
+}

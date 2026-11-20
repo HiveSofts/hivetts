@@ -1,4 +1,5 @@
-import { Button, ComboBox, LineEdit, ScrollView, Slider, VerticalBox } from "std-widgets.slint";
+import { Button, ComboBox, LineEdit, Slider, VerticalBox } from "std-widgets.slint";
+import { PageScrollView } from "../components/page-scroll-view.slint";
 import { PageHeader } from "../components/page-header.slint";
 
 // Workspace card for microphone recording, file transcription, and voice settings.
@@ -33,6 +34,7 @@ export component SpeechToTextTab inherits Rectangle {
     property <color> palette-text: root.theme == "dark" ? #f1f5f9 : #0f1b2d;
     property <color> palette-field: root.theme == "dark" ? #101722 : #f8fafc;
     property <color> palette-danger: #dc2626;
+    vertical-stretch: 1;
 
     background: root.palette-surface;
     border-radius: 14px;
@@ -102,15 +104,17 @@ export component SpeechToTextTab inherits Rectangle {
             font-weight: 700;
             color: root.palette-muted;
         }
-        ScrollView {
+        PageScrollView {
             min-height: 150px;
-            vertical-stretch: 1;
+            track-color: root.palette-border;
+            thumb-color: root.theme == "dark" ? #4f46e5 : #4338ca;
+            thumb-hover-color: root.theme == "dark" ? #7c72ff : #6d63ff;
             Text {
                 text: root.transcript-text == "" ? "The transcript will appear here." : root.transcript-text;
                 color: root.transcript-text == "" ? root.palette-muted : root.palette-text;
                 font-size: 15px;
                 wrap: word-wrap;
-                width: parent.width - 2px;
+                width: parent.width - 14px;
             }
         }
 

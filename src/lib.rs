@@ -1,7 +1,11 @@
 pub mod audio;
+pub mod batch;
 pub mod config;
+pub mod documents;
 pub mod error;
 pub mod formats;
 pub mod models;
+pub mod playback;
+pub mod preprocess;
 pub mod stt;
 pub mod tts;
