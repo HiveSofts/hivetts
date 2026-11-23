@@ -1,7 +1,6 @@
 import { StatusBar } from "components/status-bar.slint";
 import { SideNavigation } from "components/side-navigation.slint";
 import { HubModel, LanguageOption, ModelsTab } from "tabs/models.slint";
-import { SpeechToTextTab } from "tabs/speech-to-text.slint";
 import { TextToSpeechTab, VoiceRow, ReadAlongWord } from "tabs/text-to-speech.slint";
 import { Palette } from "std-widgets.slint";
 
@@ -204,9 +203,6 @@ export component AppWindow inherits Window {
         if root.current-tab == "tts" || root.current-tab == "models" {
             root.refresh-tts-voices();
         }
-        if root.current-tab == "stt" {
-            root.refresh-stt-models();
-        }
     }
 
     background: root.theme == "dark" ? #0b1120 : #eef2f8;
@@ -218,7 +214,7 @@ export component AppWindow inherits Window {
         SideNavigation {
             theme: root.theme;
             current-tab <=> root.current-tab;
-            nav-ids: ["tts", "stt", "models"];
+            nav-ids: ["tts", "models"];
             nav-labels: ["Text to Speech", "Speech to Text", "Models"];
             toggle-theme => {
                 root.theme = root.theme == "dark" ? "light" : "dark";
@@ -310,30 +306,6 @@ export component AppWindow inherits Window {
                 }
                 load-text(path) => {
                     root.load-text(path);
-                }
-            }
-
-            if root.current-tab == "stt": SpeechToTextTab {
-                theme: root.theme;
-                transcript-text: root.transcript-text;
-                is-recording: root.is-recording;
-                audio-file-path <=> root.audio-file-path;
-                model-path <=> root.model-path;
-                model-labels: root.stt-model-labels;
-                model-paths: root.stt-model-paths;
-                model-selected-index <=> root.stt-model-index;
-                piper-executable <=> root.piper-executable;
-                piper-voice <=> root.piper-voice;
-                language <=> root.language;
-                speech-rate <=> root.speech-rate;
-                start-recording => {
-                    root.start-recording();
-                }
-                stop-recording => {
-                    root.stop-recording();
-                }
-                transcribe-file(path) => {
-                    root.transcribe-file(path);
                 }
             }
 
